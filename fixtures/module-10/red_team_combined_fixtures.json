@@ -1,0 +1,152 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m10_rt2_upload_prepare_ready",
+      "description": "同用户混合链路第一步：上传整理可用",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m10-rt2-user-1",
+          "target_id": "m10-rt2-target-1",
+          "tier": "FREE",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": true,
+          "my_side": "RIGHT",
+          "screenshots": [
+            {
+              "image_id": "img-1",
+              "timestamp_hint": "2026-03-28T10:00:00",
+              "left_text": "这周有点忙",
+              "right_text": "好的，你忙完再说"
+            },
+            {
+              "image_id": "img-2",
+              "timestamp_hint": "2026-03-28T10:05:00",
+              "left_text": "❤️",
+              "right_text": "先不打扰你"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "status": "READY"
+        },
+        "required_fields": [
+          "dialogue_turns",
+          "ocr_preview"
+        ]
+      }
+    },
+    {
+      "id": "m10_rt2_relationship_free_blocked_ads",
+      "description": "同用户混合链路第二步：关系判断被广告门禁拦截",
+      "request": {
+        "endpoint": "POST /relationship/analyze",
+        "payload": {
+          "user_id": "m10-rt2-user-1",
+          "target_id": "m10-rt2-target-1",
+          "tier": "FREE",
+          "need_full_report": false,
+          "ad_proof_token": null,
+          "prepared_upload": {
+            "status": "READY",
+            "screenshot_count": 2,
+            "tier": "FREE",
+            "mode": "RELATIONSHIP",
+            "timeline_confirmed": true,
+            "my_side": "RIGHT",
+            "issues": [],
+            "ocr_preview": [],
+            "dialogue_turns": [
+              {
+                "speaker": "OTHER",
+                "text": "这周有点忙",
+                "source_image_id": "img-1"
+              },
+              {
+                "speaker": "SELF",
+                "text": "好的你忙完再聊",
+                "source_image_id": "img-1"
+              }
+            ]
+          }
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "RELATIONSHIP",
+          "gate_decision": "BLOCK"
+        },
+        "issue_path": "gating_issues",
+        "contains_issue_codes": [
+          "ADS_REQUIRED"
+        ]
+      }
+    },
+    {
+      "id": "m10_rt2_reply_force_new_session_true",
+      "description": "同用户混合链路第三步：强制新 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt2-user-1",
+          "target_id": "m10-rt2-target-1",
+          "tier": "FREE",
+          "text_input": "先打一条",
+          "force_new_session": true
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt2_reply_reuse_session_false",
+      "description": "同用户混合链路第四步：连续请求复用 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt2-user-1",
+          "target_id": "m10-rt2-target-1",
+          "tier": "FREE",
+          "text_input": "第二条不强制新建"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": false,
+          "reply_session.active": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt2_entitlement_state_after_mix",
+      "description": "同用户混合链路第五步：权益快照可读且关系次数未增长",
+      "request": {
+        "endpoint": "GET /entitlement/state/m10-rt2-user-1"
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "relationship_used": 0,
+          "pending_deducts": 0
+        },
+        "required_fields": [
+          "reply_used",
+          "emergency_pack_credits",
+          "day"
+        ]
+      }
+    }
+  ]
+}

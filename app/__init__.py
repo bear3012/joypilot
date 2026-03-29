@@ -1,0 +1,1 @@
+"""JoyPilot application package."""

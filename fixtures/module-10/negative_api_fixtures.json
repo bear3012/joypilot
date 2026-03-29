@@ -1,0 +1,71 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m10_negative_reply_missing_user_id",
+      "description": "reply 请求缺少 user_id 必须 422",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "target_id": "m10-neg-target-1",
+          "tier": "FREE",
+          "text_input": "hello"
+        }
+      },
+      "assertions": {
+        "http_status": 422
+      }
+    },
+    {
+      "id": "m10_negative_reply_invalid_tier",
+      "description": "reply tier 非法枚举必须 422",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-neg-user-2",
+          "target_id": "m10-neg-target-2",
+          "tier": "INVALID",
+          "text_input": "hello"
+        }
+      },
+      "assertions": {
+        "http_status": 422
+      }
+    },
+    {
+      "id": "m10_negative_relationship_missing_prepared_upload",
+      "description": "relationship 缺少 prepared_upload 必须 422",
+      "request": {
+        "endpoint": "POST /relationship/analyze",
+        "payload": {
+          "user_id": "m10-neg-user-3",
+          "target_id": "m10-neg-target-3",
+          "tier": "FREE",
+          "need_full_report": false
+        }
+      },
+      "assertions": {
+        "http_status": 422
+      }
+    },
+    {
+      "id": "m10_negative_upload_invalid_mode",
+      "description": "upload_prepare mode 非法枚举必须 422",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m10-neg-user-4",
+          "target_id": "m10-neg-target-4",
+          "tier": "FREE",
+          "mode": "INVALID_MODE",
+          "timeline_confirmed": true,
+          "my_side": "RIGHT",
+          "screenshots": []
+        }
+      },
+      "assertions": {
+        "http_status": 422
+      }
+    }
+  ]
+}

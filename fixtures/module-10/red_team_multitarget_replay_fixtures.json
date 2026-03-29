@@ -1,0 +1,155 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m10_rt13_reply_target_a_new_session",
+      "description": "同用户多target第一步：target-A 首次回复新建 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt13-user-1",
+          "target_id": "m10-rt13-target-a",
+          "tier": "VIP",
+          "text_input": "A-第一条",
+          "force_new_session": true
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt13_reply_target_b_new_session",
+      "description": "第二步：切到 target-B 首次回复也应新建 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt13-user-1",
+          "target_id": "m10-rt13-target-b",
+          "tier": "VIP",
+          "text_input": "B-第一条",
+          "force_new_session": true
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt13_reply_target_a_reuse_after_interleave",
+      "description": "第三步：回到 target-A，不强制新建应复用原会话",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt13-user-1",
+          "target_id": "m10-rt13-target-a",
+          "tier": "VIP",
+          "text_input": "A-第二条"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": false,
+          "reply_session.active": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt13_relationship_target_b_blocked_no_ads",
+      "description": "第四步：target-B 关系判断无广告凭证应被拦截",
+      "request": {
+        "endpoint": "POST /relationship/analyze",
+        "payload": {
+          "user_id": "m10-rt13-user-1",
+          "target_id": "m10-rt13-target-b",
+          "tier": "FREE",
+          "need_full_report": false,
+          "ad_proof_token": null,
+          "prepared_upload": {
+            "status": "READY",
+            "screenshot_count": 2,
+            "tier": "FREE",
+            "mode": "RELATIONSHIP",
+            "timeline_confirmed": true,
+            "my_side": "RIGHT",
+            "issues": [],
+            "ocr_preview": [],
+            "dialogue_turns": [
+              {
+                "speaker": "OTHER",
+                "text": "最近挺累",
+                "source_image_id": "img-m1"
+              },
+              {
+                "speaker": "SELF",
+                "text": "那你先休息",
+                "source_image_id": "img-m1"
+              }
+            ]
+          }
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "RELATIONSHIP",
+          "gate_decision": "BLOCK"
+        },
+        "issue_path": "gating_issues",
+        "contains_issue_codes": [
+          "ADS_REQUIRED"
+        ]
+      }
+    },
+    {
+      "id": "m10_rt13_reply_target_b_reuse_after_relationship",
+      "description": "第五步：回到 target-B 回复分析，不强制新建应复用 target-B 会话",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt13-user-1",
+          "target_id": "m10-rt13-target-b",
+          "tier": "VIP",
+          "text_input": "B-第二条"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": false,
+          "reply_session.active": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt13_entitlement_snapshot_final",
+      "description": "第六步：最终权益快照应一致，无 pending 泄漏",
+      "request": {
+        "endpoint": "GET /entitlement/state/m10-rt13-user-1"
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_used": 4,
+          "relationship_used": 0,
+          "pending_deducts": 0
+        },
+        "required_fields": [
+          "day",
+          "emergency_pack_credits"
+        ]
+      }
+    }
+  ]
+}

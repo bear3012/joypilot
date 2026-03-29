@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JoyPilot v1 Console</title>
+  <meta name="theme-color" content="#111827">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #0f172a;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      display: grid;
+      gap: 20px;
+    }
+    section {
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 20px;
+      background: #111827;
+    }
+    .hidden {
+      display: none !important;
+    }
+    h1, h2 {
+      margin: 0 0 16px;
+    }
+    h3 {
+      margin: 0 0 12px;
+      font-size: 16px;
+    }
+    textarea, select, input, button {
+      width: 100%;
+      box-sizing: border-box;
+      border-radius: 10px;
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 10px 12px;
+      margin-top: 8px;
+    }
+    button {
+      cursor: pointer;
+      background: #2563eb;
+      border: none;
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      background: #020617;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid #1e293b;
+    }
+    .hint {
+      color: #94a3b8;
+      font-size: 14px;
+    }
+    .status-banner {
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid #475569;
+      font-size: 14px;
+    }
+    .status-loading { border-color: #7c3aed; color: #ddd6fe; background: #2e1065; }
+    .status-safe { border-color: #16a34a; color: #bbf7d0; background: #052e16; }
+    .status-caution { border-color: #d97706; color: #fde68a; background: #451a03; }
+    .status-block { border-color: #dc2626; color: #fecaca; background: #450a0a; }
+    .panel-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 14px;
+      background: #0b1220;
+      display: grid;
+      gap: 8px;
+    }
+    .kv {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      border-bottom: 1px dashed #334155;
+      padding-bottom: 6px;
+    }
+    .kv:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    .list {
+      margin: 0;
+      padding-left: 18px;
+      display: grid;
+      gap: 6px;
+    }
+    .skeleton {
+      height: 16px;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.2s infinite linear;
+    }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    details summary {
+      cursor: pointer;
+      color: #93c5fd;
+      margin-bottom: 8px;
+    }
+    .disclaimer {
+      border: 1px solid #7f1d1d;
+      border-radius: 10px;
+      background: #1f0a0a;
+      color: #fecaca;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>JoyPilot v1 Console</h1>
+      <p class="hint">最小 Web/PWA 控制台：支持上传整理、回话分析、关系判断。实际 OCR 在 v1 先走轻量文本预览口径。</p>
+    </section>
+
+    <section class="grid">
+      <div>
+        <h2>上传整理</h2>
+        <label>用户 ID<input id="prepare-user" value="demo-user"></label>
+        <label>对象 ID<input id="prepare-target" value="target-a"></label>
+        <label>模式
+          <select id="prepare-mode">
+            <option value="RELATIONSHIP">RELATIONSHIP</option>
+            <option value="REPLY">REPLY</option>
+          </select>
+        </label>
+        <label>层级
+          <select id="prepare-tier">
+            <option value="FREE">FREE</option>
+            <option value="VIP">VIP</option>
+          </select>
+        </label>
+        <label>我是左边还是右边
+          <select id="prepare-side">
+            <option value="">未确认</option>
+            <option value="LEFT">LEFT</option>
+            <option value="RIGHT">RIGHT</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="prepare-timeline" checked> 已完成时间线确认</label>
+        <label>截图 JSON
+          <textarea id="prepare-frames" rows="10">[
+  {"image_id":"img-1","timestamp_hint":"2026-03-28T10:00:00","left_text":"这周有点忙","right_text":"哈哈没事，等你方便"},
+  {"image_id":"img-2","timestamp_hint":"2026-03-28T10:05:00","left_text":"❤️","right_text":"那我先不打扰你"}
+]</textarea>
+        </label>
+        <button id="prepare-button">调用 /upload/prepare</button>
+      </div>
+      <div>
+        <h2>回话分析</h2>
+        <label>输入一句话
+          <textarea id="reply-text" rows="6">对方刚回了一个 ❤️</textarea>
+        </label>
+        <button id="reply-button">调用 /reply/analyze</button>
+      </div>
+      <div>
+        <h2>关系判断</h2>
+        <label>是否解锁广告
+          <select id="relationship-ads">
+            <option value="false">false</option>
+            <option value="true">true</option>
+          </select>
+        </label>
+        <label>是否要完整报告
+          <select id="relationship-full">
+            <option value="false">false</option>
+            <option value="true">true</option>
+          </select>
+        </label>
+        <button id="relationship-button">调用 /relationship/analyze</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>结果面板</h2>
+      <div id="status-banner" class="status-banner status-loading">等待请求...</div>
+      <div id="result-root"></div>
+      <details>
+        <summary>原始 JSON（审计对照）</summary>
+        <pre id="raw-output">等待调用...</pre>
+      </details>
+    </section>
+  </main>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/static/service-worker.js");
+    }
+
+    const EXPLAIN_DISCLAIMER =
+      "当前结论高度依赖有限截图，切勿将其作为绝对真相。请结合现实互动持续核验。";
+    let preparedCache = null;
+    const STATUS_CLASS_BY_KEY = {
+      loading: "status-loading",
+      safe: "status-safe",
+      caution: "status-caution",
+      block: "status-block",
+    };
+    let viewState = {
+      loading: false,
+      requestName: "",
+      responseType: "",
+      response: null,
+      error: null,
+    };
+
+    async function postJson(url, payload) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      return response.json();
+    }
+
+    function setText(node, value) {
+      node.textContent = value == null ? "" : String(value);
+    }
+
+    function setRawOutput(data) {
+      const raw = document.getElementById("raw-output");
+      raw.textContent = JSON.stringify(data, null, 2);
+    }
+
+    function atomicWipeToLoading(requestName) {
+      viewState = {
+        loading: true,
+        requestName,
+        responseType: "",
+        response: null,
+        error: null,
+      };
+      renderView();
+    }
+
+    function setViewResponse(requestName, responseType, data) {
+      viewState = {
+        loading: false,
+        requestName,
+        responseType,
+        response: data,
+        error: null,
+      };
+      renderView();
+    }
+
+    function setViewError(requestName, error) {
+      viewState = {
+        loading: false,
+        requestName,
+        responseType: "",
+        response: null,
+        error: String(error || "未知错误"),
+      };
+      renderView();
+    }
+
+    function createCard(title) {
+      const card = document.createElement("div");
+      card.className = "card";
+      const h3 = document.createElement("h3");
+      setText(h3, title);
+      card.appendChild(h3);
+      return card;
+    }
+
+    function appendKV(card, key, value) {
+      const row = document.createElement("div");
+      row.className = "kv";
+      const left = document.createElement("span");
+      const right = document.createElement("span");
+      setText(left, key);
+      setText(right, value);
+      row.appendChild(left);
+      row.appendChild(right);
+      card.appendChild(row);
+    }
+
+    function appendList(card, values) {
+      if (!values || !values.length) return;
+      const ul = document.createElement("ul");
+      ul.className = "list";
+      values.forEach((item) => {
+        const li = document.createElement("li");
+        setText(li, item);
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+    }
+
+    function renderLoadingSkeleton(root) {
+      const wrap = document.createElement("div");
+      wrap.className = "panel-grid";
+      for (let i = 0; i < 4; i += 1) {
+        const box = document.createElement("div");
+        box.className = "card";
+        for (let j = 0; j < 4; j += 1) {
+          const sk = document.createElement("div");
+          sk.className = "skeleton";
+          box.appendChild(sk);
+        }
+        wrap.appendChild(box);
+      }
+      root.appendChild(wrap);
+    }
+
+    function renderPreparedUploadPanel(root, data) {
+      const card = createCard("上传整理结果");
+      appendKV(card, "status", data.status || "N/A");
+      appendKV(card, "tier", data.tier || "N/A");
+      appendKV(card, "mode", data.mode || "N/A");
+      appendKV(card, "screenshot_count", data.screenshot_count ?? 0);
+      appendKV(card, "timeline_confirmed", String(Boolean(data.timeline_confirmed)));
+      appendKV(card, "my_side", data.my_side || "N/A");
+      appendKV(card, "evidence_quality", data.evidence_quality || "N/A");
+      appendKV(card, "effective_turn_count", data.effective_turn_count ?? 0);
+      appendKV(card, "effective_char_count", data.effective_char_count ?? 0);
+      appendKV(card, "low_info_ratio", data.low_info_ratio ?? 0);
+      appendKV(card, "duplicate_content_suspected", String(Boolean(data.duplicate_content_suspected)));
+      root.appendChild(card);
+    }
+
+    function renderPreparedIssues(root, data) {
+      const issues = Array.isArray(data.issues) ? data.issues : [];
+      const card = createCard("输入问题清单");
+      appendKV(card, "issue_count", issues.length);
+      appendList(card, issues.map((issue) => `${issue.code}: ${issue.message}`));
+      root.appendChild(card);
+    }
+
+    function renderPreparedDialogueTurns(root, data) {
+      const turns = Array.isArray(data.dialogue_turns) ? data.dialogue_turns : [];
+      const card = createCard("结构化对话预览");
+      appendKV(card, "turn_count", turns.length);
+      appendList(card, turns.map((turn) => `${turn.speaker}: ${turn.text}`));
+      root.appendChild(card);
+    }
+
+    function renderPreparePanels(root, data) {
+      const grid = document.createElement("div");
+      grid.className = "panel-grid";
+      renderPreparedUploadPanel(grid, data);
+      renderPreparedIssues(grid, data);
+      renderPreparedDialogueTurns(grid, data);
+      root.appendChild(grid);
+    }
+
+    function renderSafetyAndGate(root, data) {
+      const card = createCard("安全与门禁");
+      const gateDecision = data.gate_decision || "N/A";
+      appendKV(card, "gate_decision", gateDecision);
+      appendKV(card, "safety.status", data.safety?.status || "N/A");
+      appendKV(card, "safety.block_reason", data.safety?.block_reason || "N/A");
+      if (Array.isArray(data.gating_issues) && data.gating_issues.length > 0) {
+        appendList(card, data.gating_issues.map((it) => `${it.code}: ${it.message}`));
+      }
+      root.appendChild(card);
+    }
+
+    function renderDiagnosis(root, data) {
+      if (!data.structured_diagnosis) return;
+      const d = data.structured_diagnosis;
+      const card = createCard("结构化诊断");
+      appendKV(card, "current_stage", d.current_stage || "N/A");
+      appendKV(card, "strategy", d.strategy || "N/A");
+      appendKV(card, "send_recommendation", d.send_recommendation || "N/A");
+      appendKV(card, "one_line_explanation", d.one_line_explanation || "N/A");
+      appendList(card, d.risk_signals || []);
+      root.appendChild(card);
+    }
+
+    function renderDashboard(root, data) {
+      if (!data.dashboard) return;
+      const d = data.dashboard;
+      const card = createCard("Dashboard");
+      appendKV(card, "action_light", d.action_light || "N/A");
+      appendKV(card, "tension_index", d.tension_index ?? "N/A");
+      appendKV(card, "pressure_score", d.pressure_score ?? "N/A");
+      appendKV(card, "blindspot_risk", d.blindspot_risk || "N/A");
+      appendKV(card, "macro_stage", d.macro_stage || "N/A");
+      root.appendChild(card);
+    }
+
+    function renderExplainCard(root, data) {
+      const card = createCard("Explain Card");
+      const disclaimer = document.createElement("div");
+      disclaimer.className = "disclaimer";
+      setText(disclaimer, EXPLAIN_DISCLAIMER);
+      card.appendChild(disclaimer);
+
+      if (data.explain_card) {
+        appendKV(card, "active", String(Boolean(data.explain_card.active)));
+        appendKV(card, "risk_banner_level", data.explain_card.risk_banner_level || "N/A");
+        appendKV(card, "note", data.explain_card.note || "N/A");
+
+        const details = document.createElement("details");
+        const summary = document.createElement("summary");
+        setText(summary, "证据映射明细（可折叠）");
+        details.appendChild(summary);
+        const listWrap = document.createElement("div");
+        appendList(listWrap, data.explain_card.evidence_signals || []);
+        details.appendChild(listWrap);
+        card.appendChild(details);
+      }
+      root.appendChild(card);
+    }
+
+    function renderMessageBank(root, data) {
+      const bank = data.dashboard?.message_bank;
+      if (!Array.isArray(bank) || bank.length === 0) return;
+      const card = createCard("回话路线");
+      bank.forEach((route) => {
+        const box = document.createElement("div");
+        box.className = "card";
+        appendKV(box, "tone", route.tone || "N/A");
+        appendKV(box, "recommendation", route.recommendation || "N/A");
+        appendKV(box, "reason", route.reason || "N/A");
+        appendKV(box, "text", route.text || "N/A");
+        card.appendChild(box);
+      });
+      root.appendChild(card);
+    }
+
+    function renderRelationshipPanels(root, data, isBlocked) {
+      if (
+        !data.recovery_protocol &&
+        !data.ledger &&
+        !data.sop_filter &&
+        !data.probes &&
+        !data.progress_validation &&
+        !data.reality_anchor_report
+      ) {
+        return;
+      }
+      const grid = document.createElement("div");
+      grid.className = "panel-grid";
+
+      if (data.recovery_protocol) {
+        const j22 = createCard("J22 Recovery Protocol");
+        appendKV(j22, "state", data.recovery_protocol.state || "N/A");
+        appendKV(j22, "can_exit", String(Boolean(data.recovery_protocol.can_exit)));
+        appendKV(j22, "ping_attempts_left", data.recovery_protocol.ping_attempts_left ?? 0);
+        appendKV(j22, "instruction", data.recovery_protocol.instruction || "N/A");
+        grid.appendChild(j22);
+      }
+
+      if (data.ledger) {
+        const j24 = createCard("J24 定性账本");
+        appendKV(j24, "asymmetric_risk", data.ledger.asymmetric_risk || "N/A");
+        appendList(j24, data.ledger.evidence || []);
+        appendKV(j24, "note", data.ledger.note || "N/A");
+        grid.appendChild(j24);
+      }
+
+      if (data.sop_filter) {
+        const j25 = createCard("J25 SOP 过滤");
+        appendKV(j25, "total_hits", data.sop_filter.total_hits ?? 0);
+        appendKV(j25, "risk_escalation", data.sop_filter.risk_escalation || "N/A");
+        appendList(j25, data.sop_filter.hits || []);
+        appendKV(j25, "footer", data.sop_filter.footer || "模式提示不等于定罪。");
+        grid.appendChild(j25);
+      }
+
+      // BLOCK 场景下 J26/J27 受限内容不进入 DOM。
+      if (!isBlocked && data.probes && data.probes.available === true) {
+        const j26 = createCard("J26 核验探针");
+        appendKV(j26, "available", "true");
+        const items = Array.isArray(data.probes.items) ? data.probes.items : [];
+        appendList(j26, items.map((item) => `${item.probe_type}: ${item.template}`));
+        grid.appendChild(j26);
+      }
+
+      if (!isBlocked && data.progress_validation) {
+        const pv = createCard("J26 Progress Validation");
+        appendKV(pv, "probe_type", data.progress_validation.probe_type || "N/A");
+        appendKV(pv, "intent", data.progress_validation.intent || "N/A");
+        appendKV(pv, "followup_rule", data.progress_validation.followup_rule || "N/A");
+        grid.appendChild(pv);
+      }
+
+      if (data.reality_anchor_report) {
+        const access = data.reality_anchor_report.access || "N/A";
+        const j27 = createCard("J27 现实锚点");
+        appendKV(j27, "access", access);
+        appendKV(j27, "tone", data.reality_anchor_report.tone || "N/A");
+        appendList(j27, data.reality_anchor_report.brief_points || []);
+        if (access === "PREMIUM_FULL" && data.reality_anchor_report.full_text) {
+          appendKV(j27, "full_text", data.reality_anchor_report.full_text);
+        }
+        grid.appendChild(j27);
+      }
+
+      root.appendChild(grid);
+    }
+
+    function getStatusMeta(data, loading, error) {
+      if (loading) {
+        return {text: "请求处理中，已原子清空旧视图并进入 Loading 态。", clsKey: "loading"};
+      }
+      if (error) {
+        return {text: `请求失败：${error}`, clsKey: "block"};
+      }
+      if (!data) {
+        return {text: "等待请求...", clsKey: "loading"};
+      }
+      const blocked = data.gate_decision === "BLOCK" || data.safety?.status === "BLOCKED";
+      const caution = data.gate_decision === "DEGRADE" || data.safety?.status === "CAUTION";
+      if (blocked) return {text: "BLOCK：当前处于阻断态，受限内容已从 DOM 移除。", clsKey: "block"};
+      if (caution) return {text: "DEGRADE/CAUTION：当前处于降级态，仅展示允许内容。", clsKey: "caution"};
+      return {text: "ALLOW/SAFE：当前输出可用。", clsKey: "safe"};
+    }
+
+    function renderView() {
+      const root = document.getElementById("result-root");
+      root.replaceChildren();
+      const status = document.getElementById("status-banner");
+      const meta = getStatusMeta(viewState.response, viewState.loading, viewState.error);
+      status.className = `status-banner ${STATUS_CLASS_BY_KEY[meta.clsKey] || STATUS_CLASS_BY_KEY.loading}`;
+      setText(status, meta.text);
+
+      if (viewState.loading) {
+        renderLoadingSkeleton(root);
+        return;
+      }
+      if (!viewState.response) return;
+
+      const data = viewState.response;
+      if (viewState.responseType === "prepare") {
+        renderPreparePanels(root, data);
+        return;
+      }
+      const blocked = data.gate_decision === "BLOCK" || data.safety?.status === "BLOCKED";
+      const top = document.createElement("div");
+      top.className = "panel-grid";
+      renderSafetyAndGate(top, data);
+      renderDiagnosis(top, data);
+      renderDashboard(top, data);
+      renderExplainCard(top, data);
+      root.appendChild(top);
+
+      // 仅在非阻断场景显示可推进或可用 message_bank。
+      if (!blocked) {
+        renderMessageBank(root, data);
+      }
+      renderRelationshipPanels(root, data, blocked);
+    }
+
+    document.getElementById("prepare-button").addEventListener("click", async () => {
+      try {
+        atomicWipeToLoading("upload_prepare");
+        const payload = {
+          user_id: document.getElementById("prepare-user").value,
+          target_id: document.getElementById("prepare-target").value,
+          mode: document.getElementById("prepare-mode").value,
+          tier: document.getElementById("prepare-tier").value,
+          my_side: document.getElementById("prepare-side").value || null,
+          timeline_confirmed: document.getElementById("prepare-timeline").checked,
+          screenshots: JSON.parse(document.getElementById("prepare-frames").value)
+        };
+        preparedCache = await postJson("/upload/prepare", payload);
+        setRawOutput(preparedCache);
+        setViewResponse("upload_prepare", "prepare", preparedCache);
+      } catch (error) {
+        setRawOutput({error: String(error)});
+        setViewError("upload_prepare", error);
+      }
+    });
+
+    document.getElementById("reply-button").addEventListener("click", async () => {
+      try {
+        atomicWipeToLoading("reply_analyze");
+        const payload = {
+          user_id: document.getElementById("prepare-user").value,
+          target_id: document.getElementById("prepare-target").value,
+          tier: document.getElementById("prepare-tier").value,
+          text_input: document.getElementById("reply-text").value,
+          prepared_upload: preparedCache && preparedCache.mode === "REPLY" ? preparedCache : null
+        };
+        const response = await postJson("/reply/analyze", payload);
+        setRawOutput(response);
+        setViewResponse("reply_analyze", "reply", response);
+      } catch (error) {
+        setRawOutput({error: String(error)});
+        setViewError("reply_analyze", error);
+      }
+    });
+
+    document.getElementById("relationship-button").addEventListener("click", async () => {
+      if (!preparedCache) {
+        const noPrepared = {error: "请先调用 /upload/prepare 生成整理结果。"};
+        setRawOutput(noPrepared);
+        setViewError("relationship_analyze", noPrepared.error);
+        return;
+      }
+      try {
+        atomicWipeToLoading("relationship_analyze");
+        const payload = {
+          user_id: document.getElementById("prepare-user").value,
+          target_id: document.getElementById("prepare-target").value,
+          tier: document.getElementById("prepare-tier").value,
+          prepared_upload: preparedCache,
+          need_full_report: document.getElementById("relationship-full").value === "true",
+          ad_proof_token: document.getElementById("relationship-ads").value === "true" ? "adp_demo_token_123456" : null
+        };
+        const response = await postJson("/relationship/analyze", payload);
+        setRawOutput(response);
+        setViewResponse("relationship_analyze", "relationship", response);
+      } catch (error) {
+        setRawOutput({error: String(error)});
+        setViewError("relationship_analyze", error);
+      }
+    });
+
+    renderView();
+  </script>
+</body>
+</html>

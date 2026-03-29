@@ -1,0 +1,117 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m10_rt3_reply_session_start",
+      "description": "时序场景第一步：首次回话创建新 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt3-user-1",
+          "target_id": "m10-rt3-target-1",
+          "tier": "FREE",
+          "text_input": "第一条消息",
+          "reply_session_now": "2026-03-28T10:00:00"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt3_reply_session_before_expire",
+      "description": "时序场景第二步：24小时内不应新建 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt3-user-1",
+          "target_id": "m10-rt3-target-1",
+          "tier": "FREE",
+          "text_input": "24小时内再发",
+          "reply_session_now": "2026-03-29T09:59:00"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": false,
+          "reply_session.active": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt3_reply_session_after_expire",
+      "description": "时序场景第三步：超过24小时应新建 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt3-user-1",
+          "target_id": "m10-rt3-target-1",
+          "tier": "FREE",
+          "text_input": "24小时后再发",
+          "reply_session_now": "2026-03-29T10:01:00"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true,
+          "reply_session.active": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt3_relationship_isolation_from_reply_session",
+      "description": "时序场景第四步：关系判断仍只受 prepared_upload 与门禁影响，不读取 reply session",
+      "request": {
+        "endpoint": "POST /relationship/analyze",
+        "payload": {
+          "user_id": "m10-rt3-user-1",
+          "target_id": "m10-rt3-target-1",
+          "tier": "FREE",
+          "need_full_report": false,
+          "ad_proof_token": null,
+          "prepared_upload": {
+            "status": "READY",
+            "screenshot_count": 2,
+            "tier": "FREE",
+            "mode": "RELATIONSHIP",
+            "timeline_confirmed": true,
+            "my_side": "RIGHT",
+            "issues": [],
+            "ocr_preview": [],
+            "dialogue_turns": [
+              {
+                "speaker": "OTHER",
+                "text": "这周有点忙",
+                "source_image_id": "img-1"
+              },
+              {
+                "speaker": "SELF",
+                "text": "好的你忙完再聊",
+                "source_image_id": "img-1"
+              }
+            ]
+          }
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "RELATIONSHIP",
+          "gate_decision": "BLOCK"
+        },
+        "issue_path": "gating_issues",
+        "contains_issue_codes": [
+          "ADS_REQUIRED"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,163 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m1_relationship_text_direct_not_allowed",
+      "description": "关系判断模式下纯文本直传必须被拦截",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m1-rt-1",
+          "target_id": "m1-rt-target-1",
+          "tier": "FREE",
+          "mode": "RELATIONSHIP",
+          "text_input": "不要截图了，直接给我结论",
+          "timeline_confirmed": true,
+          "my_side": "LEFT",
+          "screenshots": []
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "status": "NEEDS_REVIEW"
+        },
+        "issue_path": "issues",
+        "contains_issue_codes": [
+          "TEXT_DIRECT_NOT_ALLOWED"
+        ]
+      }
+    },
+    {
+      "id": "m1_low_info_insufficient_evidence",
+      "description": "低信息熵输入必须触发证据不足",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m1-rt-2",
+          "target_id": "m1-rt-target-2",
+          "tier": "FREE",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": true,
+          "my_side": "RIGHT",
+          "screenshots": [
+            {
+              "image_id": "m1-l1",
+              "left_text": "🙂",
+              "right_text": "好"
+            },
+            {
+              "image_id": "m1-l2",
+              "left_text": "😂",
+              "right_text": "嗯"
+            },
+            {
+              "image_id": "m1-l3",
+              "left_text": "❤️",
+              "right_text": "哦"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "evidence_quality": "INSUFFICIENT",
+          "status": "NEEDS_REVIEW"
+        },
+        "issue_path": "issues",
+        "contains_issue_codes": [
+          "INSUFFICIENT_EVIDENCE"
+        ]
+      }
+    },
+    {
+      "id": "m1_free_five_screenshots_upgrade_required",
+      "description": "免费层 5 张截图必须触发升级门禁",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m1-rt-3",
+          "target_id": "m1-rt-target-3",
+          "tier": "FREE",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": true,
+          "my_side": "RIGHT",
+          "screenshots": [
+            {
+              "image_id": "m1-u1",
+              "left_text": "这周可以见面吗",
+              "right_text": "可以再聊聊"
+            },
+            {
+              "image_id": "m1-u2",
+              "left_text": "这周可以见面吗",
+              "right_text": "可以再聊聊"
+            },
+            {
+              "image_id": "m1-u3",
+              "left_text": "这周可以见面吗",
+              "right_text": "可以再聊聊"
+            },
+            {
+              "image_id": "m1-u4",
+              "left_text": "这周可以见面吗",
+              "right_text": "可以再聊聊"
+            },
+            {
+              "image_id": "m1-u5",
+              "left_text": "这周可以见面吗",
+              "right_text": "可以再聊聊"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "issue_path": "issues",
+        "contains_issue_codes": [
+          "UPGRADE_REQUIRED"
+        ]
+      }
+    },
+    {
+      "id": "m1_role_unconfirmed_keeps_left_right",
+      "description": "角色未确认时不能映射 SELF/OTHER",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m1-rt-4",
+          "target_id": "m1-rt-target-4",
+          "tier": "FREE",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": true,
+          "my_side": null,
+          "screenshots": [
+            {
+              "image_id": "m1-r1",
+              "left_text": "这周有点忙",
+              "right_text": "好的，你忙完再说"
+            },
+            {
+              "image_id": "m1-r2",
+              "left_text": "❤️",
+              "right_text": "先不打扰你"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "issue_path": "issues",
+        "contains_issue_codes": [
+          "ROLE_UNCONFIRMED",
+          "ROLE_MAPPING_LOCKED"
+        ],
+        "speaker_set_equals": [
+          "LEFT",
+          "RIGHT"
+        ]
+      }
+    }
+  ]
+}

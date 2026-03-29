@@ -1,0 +1,9 @@
+{
+  "name": "JoyPilot v1 Console",
+  "short_name": "JoyPilot",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#111827",
+  "icons": []
+}

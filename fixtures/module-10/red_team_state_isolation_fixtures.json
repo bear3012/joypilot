@@ -1,0 +1,167 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m10_rt5_upload_prepare_target_a_ready",
+      "description": "同用户跨模块链路第一步：target-A 上传整理可用",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m10-rt5-user-1",
+          "target_id": "m10-rt5-target-a",
+          "tier": "FREE",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": true,
+          "my_side": "RIGHT",
+          "screenshots": [
+            {
+              "image_id": "img-a1",
+              "timestamp_hint": "2026-03-29T10:00:00",
+              "left_text": "你最近忙吗",
+              "right_text": "有点忙"
+            },
+            {
+              "image_id": "img-a2",
+              "timestamp_hint": "2026-03-29T10:05:00",
+              "left_text": "那你先忙",
+              "right_text": "好"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "status": "READY"
+        }
+      }
+    },
+    {
+      "id": "m10_rt5_reply_target_a_session_start",
+      "description": "第二步：target-A 首次回复创建 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt5-user-1",
+          "target_id": "m10-rt5-target-a",
+          "tier": "FREE",
+          "text_input": "我应该怎么回比较合适？"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt5_relationship_target_a_blocked_not_pollute_usage",
+      "description": "第三步：关系判断被门禁拦截，不应污染关系额度",
+      "request": {
+        "endpoint": "POST /relationship/analyze",
+        "payload": {
+          "user_id": "m10-rt5-user-1",
+          "target_id": "m10-rt5-target-a",
+          "tier": "FREE",
+          "need_full_report": false,
+          "ad_proof_token": null,
+          "prepared_upload": {
+            "status": "READY",
+            "screenshot_count": 2,
+            "tier": "FREE",
+            "mode": "RELATIONSHIP",
+            "timeline_confirmed": true,
+            "my_side": "RIGHT",
+            "issues": [],
+            "ocr_preview": [],
+            "dialogue_turns": [
+              {
+                "speaker": "OTHER",
+                "text": "你最近忙吗",
+                "source_image_id": "img-a1"
+              },
+              {
+                "speaker": "SELF",
+                "text": "那你先忙",
+                "source_image_id": "img-a2"
+              }
+            ]
+          }
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "RELATIONSHIP",
+          "gate_decision": "BLOCK"
+        },
+        "issue_path": "gating_issues",
+        "contains_issue_codes": [
+          "ADS_REQUIRED"
+        ]
+      }
+    },
+    {
+      "id": "m10_rt5_entitlement_snapshot_after_block",
+      "description": "第四步：权益快照中关系次数仍为 0，pending 为 0",
+      "request": {
+        "endpoint": "GET /entitlement/state/m10-rt5-user-1"
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "relationship_used": 0,
+          "pending_deducts": 0
+        },
+        "required_fields": [
+          "reply_used",
+          "day",
+          "emergency_pack_credits"
+        ]
+      }
+    },
+    {
+      "id": "m10_rt5_reply_target_b_new_session",
+      "description": "第五步：切到 target-B，应独立新建 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt5-user-1",
+          "target_id": "m10-rt5-target-b",
+          "tier": "FREE",
+          "text_input": "换个对象再问一次"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt5_reply_target_a_reuse_old_session",
+      "description": "第六步：回到 target-A，应复用原 session（不被 target-B 污染）",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt5-user-1",
+          "target_id": "m10-rt5-target-a",
+          "tier": "FREE",
+          "text_input": "回到原对象继续"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": false,
+          "reply_session.active": true
+        }
+      }
+    }
+  ]
+}

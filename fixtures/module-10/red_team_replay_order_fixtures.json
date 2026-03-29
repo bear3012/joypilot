@@ -1,0 +1,162 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m10_rt12_relationship_first_blocked",
+      "description": "乱序重放第一步：先打关系判断（未解锁广告）应被拦截",
+      "request": {
+        "endpoint": "POST /relationship/analyze",
+        "payload": {
+          "user_id": "m10-rt12-user-1",
+          "target_id": "m10-rt12-target-1",
+          "tier": "FREE",
+          "need_full_report": false,
+          "ad_proof_token": null,
+          "prepared_upload": {
+            "status": "READY",
+            "screenshot_count": 2,
+            "tier": "FREE",
+            "mode": "RELATIONSHIP",
+            "timeline_confirmed": true,
+            "my_side": "RIGHT",
+            "issues": [],
+            "ocr_preview": [],
+            "dialogue_turns": [
+              {
+                "speaker": "OTHER",
+                "text": "这周有点忙",
+                "source_image_id": "img-r1"
+              },
+              {
+                "speaker": "SELF",
+                "text": "好的你忙完再聊",
+                "source_image_id": "img-r1"
+              }
+            ]
+          }
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "RELATIONSHIP",
+          "gate_decision": "BLOCK"
+        },
+        "issue_path": "gating_issues",
+        "contains_issue_codes": [
+          "ADS_REQUIRED"
+        ]
+      }
+    },
+    {
+      "id": "m10_rt12_reply_after_relationship_new_session",
+      "description": "乱序重放第二步：再发回复分析，仍可正常新建 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt12-user-1",
+          "target_id": "m10-rt12-target-1",
+          "tier": "VIP",
+          "text_input": "乱序下先来一句回复分析",
+          "force_new_session": true
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt12_entitlement_snapshot_midway",
+      "description": "乱序重放第三步：中途快照不应出现 pending 泄漏",
+      "request": {
+        "endpoint": "GET /entitlement/state/m10-rt12-user-1"
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "relationship_used": 0,
+          "pending_deducts": 0
+        },
+        "required_fields": [
+          "reply_used",
+          "day"
+        ]
+      }
+    },
+    {
+      "id": "m10_rt12_upload_prepare_late_arrival_ready",
+      "description": "乱序重放第四步：最后才上传整理，仍应稳定 READY",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m10-rt12-user-1",
+          "target_id": "m10-rt12-target-1",
+          "tier": "VIP",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": true,
+          "my_side": "RIGHT",
+          "screenshots": [
+            {
+              "image_id": "img-r1",
+              "timestamp_hint": "2026-03-29T15:00:00",
+              "left_text": "这周有点忙",
+              "right_text": "好的，你忙完再说"
+            },
+            {
+              "image_id": "img-r2",
+              "timestamp_hint": "2026-03-29T15:05:00",
+              "left_text": "❤️",
+              "right_text": "先不打扰你"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "status": "READY"
+        }
+      }
+    },
+    {
+      "id": "m10_rt12_reply_replay_without_force_new",
+      "description": "乱序重放第五步：重放回复请求，不强制新建应复用 session",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt12-user-1",
+          "target_id": "m10-rt12-target-1",
+          "tier": "VIP",
+          "text_input": "再来一条验证 session 复用"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": false,
+          "reply_session.active": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt12_entitlement_snapshot_final",
+      "description": "乱序重放第六步：最终快照应一致且无 pending",
+      "request": {
+        "endpoint": "GET /entitlement/state/m10-rt12-user-1"
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_used": 2,
+          "relationship_used": 0,
+          "pending_deducts": 0
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m10_red_team_entitlement_state_fresh_user",
+      "description": "新用户权益快照应返回零值基线",
+      "request": {
+        "endpoint": "GET /entitlement/state/m10-rt-fresh-user"
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_used": 0,
+          "relationship_used": 0,
+          "pending_deducts": 0
+        },
+        "required_fields": [
+          "day",
+          "emergency_pack_credits"
+        ]
+      }
+    },
+    {
+      "id": "m10_red_team_reply_force_new_session",
+      "description": "强制新会话标记必须生效",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt-user-2",
+          "target_id": "m10-rt-target-2",
+          "tier": "FREE",
+          "text_input": "先打一条消息",
+          "force_new_session": true
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_red_team_upload_valid_index_sorts_correctly",
+      "description": "全量有效 upload_index 必须按 index 排序",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m10-rt-user-3",
+          "target_id": "m10-rt-target-3",
+          "tier": "FREE",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": true,
+          "my_side": "RIGHT",
+          "screenshots": [
+            {
+              "image_id": "img-b",
+              "upload_index": 2,
+              "timestamp_hint": "2026-03-28T09:00:00",
+              "left_text": "第二张",
+              "right_text": "收到"
+            },
+            {
+              "image_id": "img-a",
+              "upload_index": 1,
+              "timestamp_hint": "2026-03-28T11:00:00",
+              "left_text": "第一张",
+              "right_text": "好"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "ocr_preview.0.image_id": "img-a"
+        },
+        "issue_path": "issues",
+        "not_contains_issue_codes": [
+          "UPLOAD_INDEX_INVALID"
+        ]
+      }
+    },
+    {
+      "id": "m10_red_team_upload_non_positive_index_falls_back",
+      "description": "非正整数 upload_index 必须告警并回退时间戳排序",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m10-rt-user-4",
+          "target_id": "m10-rt-target-4",
+          "tier": "FREE",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": true,
+          "my_side": "RIGHT",
+          "screenshots": [
+            {
+              "image_id": "img-a",
+              "upload_index": 0,
+              "timestamp_hint": "2026-03-28T11:00:00",
+              "left_text": "第一",
+              "right_text": "ok"
+            },
+            {
+              "image_id": "img-b",
+              "upload_index": -2,
+              "timestamp_hint": "2026-03-28T10:00:00",
+              "left_text": "第二",
+              "right_text": "ok"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "ocr_preview.0.image_id": "img-b"
+        },
+        "issue_path": "issues",
+        "contains_issue_codes": [
+          "UPLOAD_INDEX_INVALID"
+        ]
+      }
+    }
+  ]
+}

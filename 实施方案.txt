@@ -1,0 +1,604 @@
+JoyPilot 实施方案 MASTER PLAN v2.2（完整版）
+
+AI-first / Gate-driven / Radar Console / ShopAppealLab Gate Pack / Aquarius Protocol
+
+0. 最高原则（写死，不讨论）
+0.1 Contract-first
+
+先定义输入/输出契约（Pydantic/JSON Schema）→ 再写 fixtures（金样/红队/负向）→ 再实现。
+
+0.2 Deterministic-by-default
+
+输出结构、字段顺序、枚举、排序规则 全部确定化
+
+允许“多样性”的地方必须 seed 固定（同输入同输出）
+
+LLM 只允许在指定字段内润色，不得改结构/意图/阈值结论
+
+0.3 No silent failure
+
+宁可返回“高熵/不确定，需要澄清/需要用户确认”，也不允许编造确定结论。
+
+0.4 Safety & Respect（去 PUA 化工程约束）
+
+禁止输出：胁迫/羞辱/操控/纠缠；惩罚式冷落、内疚绑架、逼问逼表态、阴阳怪气贬损；任何“制造焦虑”“测试服从/边界”的意图或话术。
+
+0.5 Consent-first for Sensitive Context（敏感语境同意优先）
+
+经期/健康等敏感语境：
+
+仅 Premium 可用（权限门禁）
+
+用户每次会话显式确认后才启用（同意门禁）
+
+不做健康推断
+
+默认不点名（除非用户允许且来源明确）
+
+不入记忆/不入日志原文（脱敏门禁）
+
+0.6 Self-stability First（自我稳定优先）
+
+当压力/不确定性/施压风险升高时，系统优先输出：降速、澄清、停止施压、转移注意力到自我生活（产品机制，而非口号）。
+
+0.7 Aquarius Protocol（“水瓶座补丁包”总原则）
+
+均值回归平滑：短期回落不等于崩盘
+
+现实结界覆盖：命中家人/会议/睡觉/重要客户等 → 强制 OFFLINE_SOCIAL_SHIELD
+
+框架自洽锁：用户已锁定“低压力表达” → 禁止生成索取/抱怨不回的矛盾文本
+
+沉没成本熔断：物质投入触发 48h 暂停加码（自我预算控制，不做交易式逼回馈）
+
+1. 护城河定义（产品层）
+
+JoyPilot 护城河 = User Voice DNA（像用户本人） + Per-Contact Dossier（关系档案） + 状态机（熵/回滚） + 雷达监控台（可解释动作） + 自动门禁留证（可控可审计）。
+
+2. 产品主形态：Relationship Radar Console（雷达监控台）
+2.1 输入端（两条主路径）
+
+截图上传：聊天截图 → OCR → 用户确认编辑（删敏感）→ 分析
+
+口述局势 Briefing：用户描述局势（例如“昨晚高甜，今天她陪家人消失”）→ 结构化 → 分析
+
+2.2 输出端（雷达台固定区块）
+
+雷达台必须输出（字段固定、可回归）：
+
+Action Light：🔴/🟡/🟢
+
+Tension Index（0–100）
+
+Pressure Score（0–100）
+
+Blindspot Risk（LOW/MEDIUM/HIGH）
+
+Mean Reversion（均值回归期标签，Aquarius）
+
+Availability Override（现实结界覆写，Aquarius）
+
+Frame Anchor（框架锚点/一致性锁，Aquarius）
+
+Cooldown Timer + Focus Redirect（J11）
+
+Reciprocity Meter + Sunk Cost Breaker（J12 + Aquarius）
+
+Adaptive Tension（J14）
+
+Message Bank（≤3条，可复制、可编辑）
+
+2.3 Training Wheels（防“行为石化/恐怖谷”）
+
+不提供唯一答案：输出 2–3 条不同风格但合规路线：STABLE / NATURAL / BOLD_HONEST
+
+Message Bank 默认是“草稿”，必须允许用户二次编辑。
+
+3. 低压力好感框架（替代“男方高位/免责框架”）
+3.1 定义
+
+表达好感/暧昧：只表达“我这边的感受/邀请”，不把回应任务丢给对方，并给足退出空间。
+
+3.2 三段式硬约束（可测试）
+
+任何好感表达必须同时满足：
+
+表达我
+
+不索取回应（不逼表态/不追问解释）
+
+给出口（你方便就回/不急/改天也行）
+
+3.3 禁区（Safety Gate 拦截）
+
+“现在给答案/你到底怎么想”“你不回就是不在乎”、阴阳怪气、惩罚式冷落、制造焦虑/测试服从等意图。
+
+4. 系统架构（组件与强制数据流）
+4.1 组件
+
+Client（Web MVP）
+
+OCR/文本/Briefing
+
+确认层：用户可删改敏感内容再分析
+
+Premium 控件：Cycle Care 开关、Cooldown Lock 允许开关、Frame Anchor 锁定确认
+
+API（FastAPI Orchestrator）
+
+entitlement_gate（订阅/功能可用性）
+
+consent_gate（敏感语境同意）
+
+audit_logger（脱敏留证）
+
+orchestrator（统一编排）
+
+Core Engine（纯函数优先、可测试）
+J1 normalize → J2 signals → J2.6 cycle_care → J3 state_estimate（含均值回归）→ J4 strategy_generate → J5 persona → J6 llm_polish → J7 safety_guard（含 frame_violation/manipulation）→ J10 dashboard → J11 cooldown+redirect（含结界覆写）→ J12 reciprocity+breaker → J14 adaptive_tension → J0 pack_response
+
+4.2 强制数据流
+
+输入 → 用户确认编辑 → normalize → signals → entitlement_gate → consent_gate → plugins → state_estimate → strategy_generate → safety_guard → dashboard → interventions → pack_response（严格 JSON）
+
+5. Contracts v2.2（契约：请求/响应/顺序）
+5.1 Request（输入契约）
+
+conversation_input: {type: OCR|TEXT|BRIEFING, payload}
+
+persona: register、polish_level、awkwardness_tolerance、directness、taboos[]
+
+entitlements: tier（FREE|PREMIUM）+ features[]
+
+consents: cycle_care_enabled / cycle_care_mention_allowed / cooldown_lock_enabled / frame_anchor_lock_confirmed
+
+user_goal（可选）
+
+5.2 Response（输出顺序固定）
+
+contract_version
+
+summary
+
+feature_status（总返回）
+
+dashboard（雷达台）
+
+context（仅启用插件时出现）
+
+signals
+
+risks
+
+strategies（固定 4 条顺序）
+
+next_steps
+
+interventions
+
+telemetry_stub（可选，脱敏）
+
+6. 模块路线图（J0–J14 + Aquarius 增强）
+J0 — Contracts & Output Panel v2.2
+
+锁死字段/枚举/顺序；所有模块以此为总线。
+
+J1 — Conversation Normalize
+
+OCR/文本/briefing 统一 turns（speaker/text/ts?）。
+
+J2 — Signal Extract v1
+
+启发式识别：冷淡/拒绝/误会/玩笑/边界提示/线下忙（结界词类别）等。禁止从模糊信号推断经期。
+
+J2.6 — Cycle Care Plugin v1（Premium + 用户确认）
+
+不推断；来源仅 user_toggle|explicit_mention（且仍需用户确认启用）
+
+默认不点名；mention_allowed=false 时禁出现经期相关词
+
+不给医疗建议；不入 Memory/日志原文
+只影响：降刺激/降速/尊重边界/询问需求/允许暂停。
+
+J3 — Entropy & State Estimate v2（含 Aquarius：Mean Reversion Smoother）
+
+熵 + 状态机 + 迟滞 + 回滚
+
+均值回归平滑器：检测 24h 内 Spike（高甜/高密度互动）→ 后续 24–48h 标记 mean_reversion.active=true，并强制降低“追问/连发/追跌杀跌”倾向，输出标准解释文案。
+
+J4 — Strategy Generator v1
+
+固定 4 策略顺序：humor / boundary / empathy / pause，并注入：
+
+低压力好感框架约束
+
+cycle_care 约束
+
+mean_reversion 期降速约束
+
+J5 — Persona Engine v1
+
+控制 register、句长、口头禅、禁区与“真实感旋钮”。
+
+J6 — LLM Integration v1（只润色）
+
+LLM 只润色、不改结论；失败 fallback 规则版。
+
+J7 — Safety Guard v2（含 Aquarius：frame_violation）
+
+risk flags（至少）：
+
+harassment / coercion / insult / sexual_pressure / obsession
+
+stereotype_risk / opportunistic_push_risk / medical_advice_risk
+
+manipulation_risk（制造焦虑/测试服从/惩罚式冷落/交易式逼回馈）
+
+frame_violation（框架一致性违规）
+触发 → 改写为低压力表达/尊重同意，或拒答给替代。
+
+J10 — Radar Dashboard Synthesizer v2（含 Aquarius：Frame Integrity Lock + Blindspot）
+
+纯规则确定性输出：action_light/tension/pressure/blindspot/解释/候选消息。
+
+Blindspot 防错位：昨晚高甜 + 今天突然掉线且无明确拒绝 → 必给 CARE_PING_ONESHOT（关怀式澄清）优先于“冷漠冷却”。
+
+J11 — Dynamic Cooldown & Focus Redirect v2（含 Aquarius：Physical Shield Override）
+
+检测到“家人/聚餐/开会/睡觉/重要客户”等现实高优先事项词类别 → 强制覆写 OFFLINE_SOCIAL_SHIELD，触发最长档位 cooldown（如 24h）并弹出 Focus Redirect。
+
+Cooldown Lock 默认关闭；开启后必须可撤回、可二次确认发送、并留证。
+
+J12 — Investment–Reciprocity Meter v2（含 Aquarius：Sunk Cost Circuit Breaker）
+
+定位：自我投入管理（不是交易/不是对对方道德评判）。
+
+物质投入（用户标记或明确证据）触发 48h 熔断：暂停外卖/礼物/长文关心（自我预算控制，不与“对方回馈”绑定为交换条件）。
+
+J14 — Adaptive Tension Module v1（绿灯张力：节奏自持 + 俏皮互动）
+
+绿灯且风险低：建议轻微延迟（有上限），并给 1–2 条 seed 固定的“俏皮互动”候选
+
+cycle_care/盲区高/熵高 → 降级为 PACE_ONLY
+
+任意操控意图触发 manipulation_risk → 关闭/降级
+
+7. Aquarius Protocol（四项增强：写死为门禁可测规则）
+A1（J3）：Mean Reversion Smoother（均值回归）
+
+Spike 检测（过去 24h 极端峰值）→ 24–48h 内 mean_reversion.active=true
+
+UI 强制输出：“均值回归期，勿追问/勿连发”（固定模板）
+
+若出现明确拒绝/边界 → 不走均值回归安抚，直接边界策略
+
+A2（J11）：Physical Shield Detection（现实结界覆写）
+
+Briefing/对话命中现实高优先事项类别词 → 无视高甜积累，强制 OFFLINE_SOCIAL_SHIELD + 24h cooldown + Focus Redirect（固定模板）
+
+A3（J10/J7）：Frame Integrity Lock（框架防崩塌锁）
+
+dashboard 中 frame_anchor：OFF|CANDIDATE|LOCKED
+
+自动识别只能到 CANDIDATE；用户确认后才 LOCKED
+
+LOCKED 后如果用户生成抱怨不回/索取回应 → frame_violation 拦截 + 给低压力替代
+
+A4（J12）：Sunk Cost Circuit Breaker（沉没成本熔断）
+
+标记/明确证据出现外卖/礼物 → breaker active 48h
+
+UI 常驻红提示：暂停物质投入与长文输出，48h 后再评估（固定模板）
+
+8. 测试体系（fixtures & 断言）
+8.1 fixtures 最小配额（起步）
+
+golden ≥ 100（按模块分组）
+
+red-team ≥ 150（操控/羞辱/纠缠/性暗示/医疗建议/交易式逼回馈）
+
+entitlement/consent ≥ 20
+
+NEG3：每模块 ≥ 3（缺证据/空输入/边界冲突/锁定覆盖）
+
+8.2 关键断言（统一断言工具）
+
+schema 通过；字段顺序固定
+
+strategies 必须 4 条且顺序固定；risks 在 strategies 前
+
+高熵 → pause 必出现；next_steps 必含减速/澄清
+
+blindspot 高 → 必给 CARE_PING_ONESHOT
+
+mean_reversion.active → 必含“勿追问/勿连发”导向
+
+availability_override.active → 必覆写 OFFLINE_SOCIAL_SHIELD + 最长 cooldown
+
+frame_anchor=LOCKED → 生成“抱怨不回/索取回应”必须拦截
+
+sunk_cost_breaker.active → do_not_do 必含 NO_DELIVERY/NO_GIFTS/NO_LONG_TEXT
+
+J14 banter 必 seed 固定；不得出现 manipulation 意图
+
+cooldown_lock 仅在用户开启时生效，且必须可撤回/二次确认发送
+
+9. 数据与隐私（默认更保守）
+
+默认不存原文；日志严禁原文与 PII
+
+Memory/Dossier：只存脱敏特征与偏好位；一键删除
+
+经期关怀：不存健康事实/日期/推断；默认不点名
+
+Reciprocity：避免对非用户当事人的长期画像（会话内低维信号即可）
+
+10. 商业与审核口径（避免“灰产定位”）
+
+对外定位统一为：Conversation Coach / Message Drafting / Self-regulation
+禁用词：监控、操控、拿捏、战术、心理控制等。Reciprocity 定位为自我投入管理。
+
+11. JoyPilot 控制中心（Control Center）目录规范（ShopAppealLab 同构）
+
+这一章是你要求的“完整版补齐”：把 ShopAppealLab 的 控制中心 + 脚本入口 + 留证产物按原样迁移到 JoyPilot，并扩展 JoyPilot 的 fixtures/模块。核心理念：一切围绕 docs_control_center/ 组织，流程固定 6 步闭环。
+
+MAINTENANCE
+
+11.1 JoyPilot 仓库目录树（最多 3 层）
+
+ShopAppealLab 当前的“最小可跑”目录结构是这样（你要求 JoyPilot 同构迁移）：
+
+REPO_SNAPSHOT
+
+joypilot/
+├── docs_control_center/
+│   ├── CHATGPT_HANDOFF.md
+│   ├── DEV_RULES_AI_FIRST.md
+│   ├── FIELD_REGISTRY.md
+│   ├── log.md
+│   ├── REPO_SNAPSHOT.md
+│   ├── TASK_CARD.md
+│   ├── WORKFLOW.md
+│   ├── UPDATE_PLAYBOOK.md
+│   ├── MAINTENANCE.md
+│   ├── MODULE_ROADMAP.md
+│   ├── 门禁体系速查使用说明.md
+│   └── gemini_review_packet.md   (由 run_and_log 自动生成/覆盖)
+├── scripts/
+│   ├── run_and_log.py                (统一留证入口)
+│   ├── run_all_smokes.py             (OPS3 全量回归入口，必须 .py)
+│   ├── doc_impact_scan.py            (DOC_IMPACT 扫描)
+│   ├── check_redaction.py            (OPS4 脱敏门禁)
+│   ├── check_batch_limits.py         (OPS5 容量门禁)
+│   ├── make_ops5_override_ticket.py  (人类破窗票据)
+│   ├── install_git_hooks.sh / .ps1   (hooks 安装)
+│   ├── git_hooks/ (pre-commit / pre-commit.cmd / pre-push 等)
+│   └── smoke_*.py                    (模块 smoke / 离线 smoke / redteam smoke)
+├── fixtures/
+│   ├── golden/
+│   ├── redteam/
+│   ├── neg/
+│   └── manifests/ (若未来引入 manifest+sha256 的规则库/模板库)
+├── src/
+│   └── joypilot/ (FastAPI + engine)
+└── .cursor/
+    └── rules/ (核心门禁规则 mdc：contract/field_registry/update_playbook 等)
+
+备注：ShopAppealLab 的 REPO_SNAPSHOT 强制“最多 3 层”，并规定新增目录/关键脚本时要同步更新 REPO_SNAPSHOT。
+
+UPDATE_PLAYBOOK
+
+11.2 docs_control_center：每个文件的“唯一职责”
+
+ShopAppealLab 的交接书明确了控制中心的核心文件路径（JoyPilot 原样照搬）：
+
+CHATGPT_HANDOFF
+
+DEV_RULES_AI_FIRST.md：10 条硬规则、合规红线、log 脱敏
+
+WORKFLOW.md：固定 6 步流程 + hooks 规则
+
+FIELD_REGISTRY.md：对外 contract 唯一口径
+
+TASK_CARD.md：当前模块任务卡（覆盖式写入）
+
+log.md：运行证据（只能追加记录块；原则上只允许 run_and_log 写入）
+
+MAINTENANCE
+
+另外三本“维护与变更真理源”（JoyPilot 必须补齐）：
+
+USAGE.md：怎么启动/怎么调用/怎么跑测试（run_and_log 的真实行为与参数）
+
+USAGE
+
+MAINTENANCE.md：fixtures/manifest/hash/模板库维护流程与故障处理（含 NEG3 纪律与 run_and_log 限制）
+
+MAINTENANCE
+
+UPDATE_PLAYBOOK.md：门禁/留证/脚本/规则/WORKFLOW 的更新口径；以及“什么时候更新 REPO_SNAPSHOT/MODULE_ROADMAP”。
+
+UPDATE_PLAYBOOK
+
+11.3 接手/交接流程（给新 ChatGPT/新会话）
+
+JoyPilot 未来如果换会话/换模型，贴文件顺序直接照 ShopAppealLab 的交接约定：一次只贴一个文件，并按固定顺序贴：
+
+CHATGPT_HANDOFF
+
+docs_control_center/CHATGPT_HANDOFF.md
+
+docs_control_center/REPO_SNAPSHOT.md
+
+.cursor/rules/00_core_contract.mdc
+
+.cursor/rules/10_field_registry_gate.mdc
+
+docs_control_center/log.md
+
+12. 自动化门禁（Gate Runner）与命令入口（ShopAppealLab 同款）
+12.1 每个模块收尾 = 2 条证据 + 1 个审计包（写死）
+
+门禁速查写得很直白：每模块收尾必须有两条 run_and_log 留证 + 自动生成审计包：
+
+门禁体系速查使用说明
+
+模块 smoke PASS（run_and_log 留证）
+
+OPS3 全量回归 PASS（run_and_log 留证，且必须出现 SCOPE: FULL_OPS3_SWEEP）
+
+自动生成/覆盖 docs_control_center/gemini_review_packet.md（复审用）
+
+12.2 标准命令（必须用 run_and_log 留证）
+A) 模块 smoke（留证 1）
+
+门禁速查给了标准范式：
+
+门禁体系速查使用说明
+
+python scripts/run_and_log.py --module_id <MODULE_ID> --record_id <三位数> --smoke_script scripts/smoke_<module>_xx.py
+B) OPS3 全量回归 sweep（留证 2）
+
+必须通过 run_and_log，并带 --is-full-sweep 1，smoke_script 必须指向 .py 的 sweep 脚本（不是 .sh）：
+
+门禁体系速查使用说明
+
+门禁体系速查使用说明
+
+python scripts/run_and_log.py --module_id <MODULE_ID> --record_id <ID> --start_server 0 --is-full-sweep 1 --smoke_script scripts/run_all_smokes.py
+
+规则：看不到 SCOPE: FULL_OPS3_SWEEP 就不算全量回归（防伪）。
+
+门禁体系速查使用说明
+
+12.3 Closeout 一键收尾（可选，但强烈建议 JoyPilot 也做）
+
+ShopAppealLab 已经把 closeout（一次命令完成 smoke + sweep + 兜底门禁 + 生成 packet）写入任务卡目标：
+
+log
+
+closeout 做的事（JoyPilot 同款要求）：
+
+一次命令完成：模块 smoke + OPS3 sweep 两条留证
+
+写 log 前强制 DOC_IMPACT 扫描 + must_update 实质修改验证
+
+写 log 后兜底执行 OPS4/OPS5；失败回滚 log 并 exit 1
+
+packet scope 标记 CLOSEOUT
+
+13. DOC_IMPACT（自动强制更新手册，不靠记忆）
+
+当你改动“怎么启动/怎么调用/怎么跑测试/fixtures 维护/门禁流程”时，必须更新相应手册。门禁速查明确：不确定就跑扫描看 must_update：
+
+门禁体系速查使用说明
+
+门禁体系速查使用说明
+
+git add <只 add 本模块相关文件>
+python scripts/doc_impact_scan.py --mode cached
+
+输出里只看：
+
+must_update 非空 → 必须先更新对应手册正文（不是只 bump 版本号），再 run_and_log 留证。
+
+门禁体系速查使用说明
+
+14. OPS4/OPS5（脱敏门禁 + 容量门禁）——JoyPilot 必须更严格
+14.1 OPS4：日志脱敏红线（JoyPilot 关键）
+
+维护指南列出禁止项：请求体原文、任何 secret/token、PII、Traceback/本机路径等；并指出已有 redaction gate 工具与 smoke 用例。JoyPilot 处理聊天/OCR 更敏感，因此 OPS4 绝对要作为提交前门禁。 
+
+MAINTENANCE
+
+14.2 OPS5：容量与分批录入（防 Cursor 整件重写）
+
+门禁速查给了具体阈值与原则：log 只能追加记录块、超长截断、必要时拆 041a/041b；并给出 OPS5 与 run_and_log 的默认限制参数名。JoyPilot 直接照搬：
+
+门禁体系速查使用说明
+
+OPS5（check_batch_limits.py）：
+
+OPS5_MAX_LINES（默认 1200）
+
+OPS5_LOG_BLOCK_MAX_LINES（默认 200）
+
+OPS5_LOG_BLOCK_MAX_CHARS（默认 40000）
+
+run_and_log 输出截断：
+
+RUN_AND_LOG_OUTPUT_MAX_LINES（默认 500）
+
+RUN_AND_LOG_OUTPUT_MAX_CHARS（默认 45000）
+
+Override（人类破窗票据）
+
+仅当确认是合理大改动才用，一次性票据，TTL 短，且成功后自动删除；CI/非交互终端禁止生成票据；票据被 git 跟踪直接 FAIL。JoyPilot 原样照搬。 
+
+门禁体系速查使用说明
+
+15. Git Hooks（本地自动门禁：提交前 OPS4/OPS5，推送前 OPS3）
+
+WORKFLOW 写死了 hooks 安装命令与效果（JoyPilot 直接照搬）：
+
+WORKFLOW
+
+安装：
+
+Linux/Mac：bash scripts/install_git_hooks.sh
+
+Windows：powershell -ExecutionPolicy Bypass -File scripts/install_git_hooks.ps1
+
+提交前自动：OPS4 redaction gate（扫描 log 命中敏感即失败）
+
+推送前自动：OPS3 smoke sweep（Windows 无 bash 用 python scripts/run_all_smokes.py）
+
+16. run_and_log 统一入口的硬规则（JoyPilot 必须继承）
+16.1 run_and_log 的真实行为与参数（写进 USAGE）
+
+USAGE 明确：run_and_log 会（可选）启动 uvicorn、等 /healthz、跑 smoke、汇总输出、脱敏后写 docs_control_center/log.md；并列出真实参数名。JoyPilot 的 run_and_log 必须保持这个“单入口留证”语义一致。 
+
+USAGE
+
+16.2 重要限制：run_and_log 会固定传 --base_url
+
+维护指南明确：run_and_log 运行 smoke 时固定执行 python <smoke_script> --base_url http://127.0.0.1:PORT，所以所有要被 run_and_log 包裹的 smoke 必须能 parse --base_url（即使离线不用）。对离线 smoke 的现实处理只有两种：要么手工按 log 模板追加（必须脱敏），要么给 smoke 补 --base_url 兼容再统一留证。JoyPilot 直接继承这条硬规则。 
+
+MAINTENANCE
+
+17. JoyPilot 专属扩展（在不破坏 ShopAppealLab Gate Pack 的前提下）
+
+在保持控制中心/脚本/留证规则同构的前提下，JoyPilot 只需要“加模块不改门禁范式”：
+
+fixtures 目录新增：
+
+fixtures/golden/joypilot/*.json|yaml（对话输入→输出快照）
+
+fixtures/redteam/joypilot/*.json|yaml（操控/羞辱/纠缠/性暗示/医疗建议/交易式回馈）
+
+fixtures/neg/joypilot/*.json|yaml（NEG3：异常/缺证据/边界冲突）
+
+scripts 新增：
+
+scripts/smoke_j3_mean_reversion.py
+
+scripts/smoke_j11_physical_shield_override.py
+
+scripts/smoke_j10_frame_anchor_lock.py
+
+scripts/smoke_j12_sunk_cost_breaker.py
+
+scripts/smoke_j14_seeded_banter_determinism.py
+
+scripts/smoke_safety_manipulation_intent.py
+
+scripts/run_all_smokes.py 把 JoyPilot 的 smoke 分组纳入 sweep（确保每模块收尾可做 FULL_OPS3_SWEEP 留证）
+
+18. “两条证据”的 JoyPilot 收尾标准（最终写死口径）
+
+每个 JoyPilot 模块（J0/J1/…/J14）收尾必须在 docs_control_center/log.md 里看到两条由 run_and_log 写入的记录块：
+
+SCOPE: MODULE_SMOKE + PASS
+
+SCOPE: FULL_OPS3_SWEEP + PASS
+并自动更新 docs_control_center/gemini_review_packet.md（供复审勾选）。

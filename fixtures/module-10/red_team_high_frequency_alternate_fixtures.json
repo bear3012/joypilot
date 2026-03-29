@@ -1,0 +1,173 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m10_rt14_reply_ta_1",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt14-user-1",
+          "target_id": "m10-rt14-target-a",
+          "tier": "VIP",
+          "text_input": "A-1",
+          "force_new_session": true
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt14_reply_tb_1",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt14-user-1",
+          "target_id": "m10-rt14-target-b",
+          "tier": "VIP",
+          "text_input": "B-1",
+          "force_new_session": true
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt14_reply_ta_2_reuse",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt14-user-1",
+          "target_id": "m10-rt14-target-a",
+          "tier": "VIP",
+          "text_input": "A-2"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_session.is_new_session": false,
+          "reply_session.active": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt14_reply_tb_2_reuse",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt14-user-1",
+          "target_id": "m10-rt14-target-b",
+          "tier": "VIP",
+          "text_input": "B-2"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_session.is_new_session": false,
+          "reply_session.active": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt14_reply_tc_1",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt14-user-1",
+          "target_id": "m10-rt14-target-c",
+          "tier": "VIP",
+          "text_input": "C-1",
+          "force_new_session": true
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt14_reply_ta_3_reuse",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt14-user-1",
+          "target_id": "m10-rt14-target-a",
+          "tier": "VIP",
+          "text_input": "A-3"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_session.is_new_session": false
+        }
+      }
+    },
+    {
+      "id": "m10_rt14_reply_tb_3_reuse",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt14-user-1",
+          "target_id": "m10-rt14-target-b",
+          "tier": "VIP",
+          "text_input": "B-3"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_session.is_new_session": false
+        }
+      }
+    },
+    {
+      "id": "m10_rt14_reply_tc_2_reuse",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt14-user-1",
+          "target_id": "m10-rt14-target-c",
+          "tier": "VIP",
+          "text_input": "C-2"
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_session.is_new_session": false,
+          "reply_session.active": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt14_entitlement_snapshot_final",
+      "request": {
+        "endpoint": "GET /entitlement/state/m10-rt14-user-1"
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "reply_used": 8,
+          "pending_deducts": 0
+        },
+        "required_fields": [
+          "relationship_used",
+          "day"
+        ]
+      }
+    }
+  ]
+}

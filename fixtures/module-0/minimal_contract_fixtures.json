@@ -1,0 +1,135 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "free_reply_minimal",
+      "description": "免费回话最小请求与关键响应字段",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "u_free_1",
+          "target_id": "t_1",
+          "tier": "FREE",
+          "text_input": "对方只回了一个 ❤️",
+          "user_goal_mode": "MAINTAIN",
+          "style_mode": "NATURAL"
+        }
+      },
+      "response_assertions": {
+        "required_fields": [
+          "contract_version",
+          "mode",
+          "dashboard",
+          "safety",
+          "explain_card",
+          "reply_session",
+          "structured_diagnosis",
+          "signals"
+        ],
+        "expected_mode": "REPLY",
+        "expected_reply_route_count": 3
+      }
+    },
+    {
+      "id": "free_relationship_minimal",
+      "description": "免费关系判断最小请求与关键响应字段",
+      "request": {
+        "endpoint": "POST /relationship/analyze",
+        "payload": {
+          "user_id": "u_free_2",
+          "target_id": "t_2",
+          "tier": "FREE",
+          "ad_proof_token": null,
+          "need_full_report": false,
+          "prepared_upload": {
+            "status": "READY",
+            "screenshot_count": 2,
+            "tier": "FREE",
+            "mode": "RELATIONSHIP",
+            "timeline_confirmed": true,
+            "my_side": "RIGHT",
+            "issues": [],
+            "ocr_preview": [],
+            "dialogue_turns": [
+              {
+                "speaker": "OTHER",
+                "text": "这周有点忙",
+                "source_image_id": "img-1"
+              },
+              {
+                "speaker": "SELF",
+                "text": "好的你忙完再聊",
+                "source_image_id": "img-1"
+              }
+            ]
+          }
+        }
+      },
+      "response_assertions": {
+        "required_fields": [
+          "contract_version",
+          "mode",
+          "dashboard",
+          "safety",
+          "structured_diagnosis",
+          "ledger",
+          "sop_filter",
+          "probes",
+          "progress_validation",
+          "reality_anchor_report",
+          "gating_issues"
+        ],
+        "expected_mode": "RELATIONSHIP",
+        "expected_ads_issue_code": "ADS_REQUIRED"
+      }
+    },
+    {
+      "id": "vip_relationship_minimal",
+      "description": "VIP 关系判断最小请求与关键响应字段",
+      "request": {
+        "endpoint": "POST /relationship/analyze",
+        "payload": {
+          "user_id": "u_vip_1",
+          "target_id": "t_3",
+          "tier": "VIP",
+          "ad_proof_token": "adp_fixture_token_123456",
+          "need_full_report": true,
+          "prepared_upload": {
+            "status": "READY",
+            "screenshot_count": 5,
+            "tier": "VIP",
+            "mode": "RELATIONSHIP",
+            "timeline_confirmed": true,
+            "my_side": "LEFT",
+            "issues": [],
+            "ocr_preview": [],
+            "dialogue_turns": [
+              {
+                "speaker": "SELF",
+                "text": "这周末你有空吗",
+                "source_image_id": "img-2"
+              },
+              {
+                "speaker": "OTHER",
+                "text": "可以呀，看看时间",
+                "source_image_id": "img-2"
+              }
+            ]
+          }
+        }
+      },
+      "response_assertions": {
+        "required_fields": [
+          "contract_version",
+          "mode",
+          "dashboard",
+          "safety",
+          "structured_diagnosis",
+          "reality_anchor_report.full_text"
+        ],
+        "expected_mode": "RELATIONSHIP",
+        "expected_report_access": "PREMIUM_FULL"
+      }
+    }
+  ]
+}

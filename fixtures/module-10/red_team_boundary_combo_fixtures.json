@@ -1,0 +1,116 @@
+{
+  "contract_version": "v1.0.0",
+  "scenarios": [
+    {
+      "id": "m10_rt11_upload_prepare_boundary_combo_fallback",
+      "description": "上传整理边界组合：混合 upload_index（含 0/缺失）时应回退排序且返回 warning",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m10-rt11-user-1",
+          "target_id": "m10-rt11-target-1",
+          "tier": "VIP",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": true,
+          "my_side": "LEFT",
+          "screenshots": [
+            {
+              "image_id": "img-c1",
+              "upload_index": 2,
+              "timestamp_hint": "2026-03-29T10:02:00",
+              "left_text": "你这周有空吗",
+              "right_text": "还在排时间"
+            },
+            {
+              "image_id": "img-c2",
+              "upload_index": 0,
+              "timestamp_hint": "2026-03-29T10:01:00",
+              "left_text": "先别有压力",
+              "right_text": "谢谢你理解"
+            },
+            {
+              "image_id": "img-c3",
+              "timestamp_hint": "2026-03-29T10:03:00",
+              "left_text": "我们慢慢来",
+              "right_text": "好"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "status": "NEEDS_REVIEW"
+        },
+        "issue_path": "issues",
+        "contains_issue_codes": [
+          "UPLOAD_INDEX_INVALID"
+        ]
+      }
+    },
+    {
+      "id": "m10_rt11_reply_boundary_combo_long_unicode",
+      "description": "回复边界组合：长文本 + Unicode + 强制新 session 仍应稳定返回",
+      "request": {
+        "endpoint": "POST /reply/analyze",
+        "payload": {
+          "user_id": "m10-rt11-user-2",
+          "target_id": "m10-rt11-target-2",
+          "tier": "VIP",
+          "text_input": "边界组合测试🙂🙃⚠️：我希望表达边界但不伤害关系。--我希望表达边界但不伤害关系。--我希望表达边界但不伤害关系。--我希望表达边界但不伤害关系。--我希望表达边界但不伤害关系。--我希望表达边界但不伤害关系。--我希望表达边界但不伤害关系。--我希望表达边界但不伤害关系。--我希望表达边界但不伤害关系。--我希望表达边界但不伤害关系。",
+          "force_new_session": true
+        }
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "mode": "REPLY",
+          "reply_session.is_new_session": true
+        }
+      }
+    },
+    {
+      "id": "m10_rt11_upload_prepare_combo_invalid_types_422",
+      "description": "上传整理边界组合：枚举值非法 + 类型非法时返回 422",
+      "request": {
+        "endpoint": "POST /upload/prepare",
+        "payload": {
+          "user_id": "m10-rt11-user-3",
+          "target_id": "m10-rt11-target-3",
+          "tier": "FREE",
+          "mode": "RELATIONSHIP",
+          "timeline_confirmed": "true",
+          "my_side": "CENTER",
+          "screenshots": [
+            {
+              "image_id": "img-e1",
+              "upload_index": "first",
+              "left_text": "测试"
+            }
+          ]
+        }
+      },
+      "assertions": {
+        "http_status": 422
+      }
+    },
+    {
+      "id": "m10_rt11_entitlement_state_no_pending_leak",
+      "description": "边界组合后查询权益快照，应无 pending 泄漏",
+      "request": {
+        "endpoint": "GET /entitlement/state/m10-rt11-user-2"
+      },
+      "assertions": {
+        "http_status": 200,
+        "path_equals": {
+          "pending_deducts": 0
+        },
+        "required_fields": [
+          "reply_used",
+          "relationship_used",
+          "day"
+        ]
+      }
+    }
+  ]
+}
