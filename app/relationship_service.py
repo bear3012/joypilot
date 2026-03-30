@@ -4,6 +4,9 @@ import re
 
 from app.config import (
     CONTRACT_VERSION,
+    J30_GAP_MINUTES,
+    J30_MIN_INTERRUPTION_COUNT,
+    J30_WARN,
     LATENCY_NOTE_DISCLAIMER,
     NEGATIVE_KEYWORDS,
     POSITIVE_KEYWORDS,
@@ -13,6 +16,8 @@ from app.contracts import (
     ExplainCard,
     GateDecision,
     Issue,
+    LLMContext,
+    MessageBankItem,
     Mode,
     ProgressValidation,
     ProbeItem,
@@ -31,6 +36,7 @@ from app.input_service import (
     CONVERSATION_ENDERS,
     analyze_latency_from_turns,
     dedupe_issues,
+    scan_flow_interruptions,
     validate_relationship_material,
 )
 from app.signal_service import extract_signals, summarize_risk_signals
@@ -64,6 +70,13 @@ J28_DODGE_TOKENS = (
     "不方便",
     "先这样",
 )
+
+# J29: one-veto note appended only when NOT in a COLD->HOT contradiction scenario.
+J29_NAKED_PUNCT_WARN = (
+    "【投资失衡】对方的回应中出现了「极简标点回复（裸标点）」，"
+    "这是典型的敷衍或回避态度，请立刻停止长篇大论或连续提问，切勿继续单向追加投资。"
+)
+# J29_HIGH_VALUE_SIGNAL is reserved for future LLM integration; not wired in v1.
 
 
 async def analyze_relationship(request: RelationshipAnalyzeRequest) -> RelationshipAnalyzeResponse:
@@ -121,27 +134,9 @@ async def analyze_relationship(request: RelationshipAnalyzeRequest) -> Relations
     )
     report = _enforce_j27_past_fact_only(report)
 
-    message_bank = []
-    if gate_decision == GateDecision.DEGRADE:
-        message_bank.append(
-            {
-                "route_id": "stable_guard",
-                "tone": "STABLE",
-                "recommendation": Recommendation.WAIT.value,
-                "text": "我先按稳妥方式处理，等信息更完整再判断也不迟。",
-                "reason": "检测到输入风险，已进入保守降级模式。",
-            }
-        )
-    elif safety.allowed_to_generate_messages and send_recommendation == Recommendation.YES:
-        message_bank.append(
-            {
-                "route_id": "relationship_probe",
-                "tone": "NATURAL",
-                "recommendation": send_recommendation.value,
-                "text": "如果你这周方便，我们找个轻松点的时间见一面，不方便也没关系。",
-                "reason": "低压力现实核验，不逼答复。",
-            }
-        )
+    # Mode2（关系分析）：不向 dashboard.message_bank 输出可复制单句回复。
+    # 态度与宏观策略见 structured_diagnosis、ledger.note、probes（探针为「下一步动作模板」，非针对当前一句的直接回复）。
+    message_bank: list[MessageBankItem] = []
 
     diagnosis = StructuredDiagnosis(
         current_stage=stage,
@@ -168,10 +163,28 @@ async def analyze_relationship(request: RelationshipAnalyzeRequest) -> Relations
         macro_stage=stage,
         interest_discriminator_panel="单点信号只算候选证据",
         stage_transition="observe" if send_recommendation != Recommendation.YES else "light_probe",
-        message_bank=message_bank if safety.allowed_to_generate_messages else [],
+        message_bank=message_bank,
     )
     sop_filter = _force_sop_footer(_build_sop_filter(texts))
     ledger = _enforce_j24_qualitative_only(_build_ledger(prepared))
+    if gate_decision == GateDecision.DEGRADE:
+        ledger = ledger.model_copy(
+            update={
+                "note": _append_ledger_note(
+                    ledger.note,
+                    "【策略提示】当前处于输入降级模式：建议维持低压力互动、避免主动推进与押码式表白，"
+                    "等信息与证据更完整后再判断；本报告不提供针对单句的逐字可用回复话术。",
+                )
+            }
+        )
+
+    # Capture base state before J28/J29 overrides so the COLD->HOT contradiction
+    # scenario can perform a silent rollback without leaving partial overrides.
+    _base_send_recommendation = send_recommendation
+    _base_diagnosis = diagnosis
+    _base_dashboard = dashboard
+    _base_ledger = ledger
+
     j28_trend = _calculate_j28_trend(prepared, self_mode="SELF", other_mode="OTHER")
     if j28_trend and gate_decision != GateDecision.DEGRADE:
         if j28_trend["trend"] == "HOT_TO_COLD":
@@ -236,6 +249,102 @@ async def analyze_relationship(request: RelationshipAnalyzeRequest) -> Relations
                     )
                 }
             )
+    # J29 Matrix: scoped to current active window (Part_B if ender found, else all turns).
+    # Finds the ender independently so that scoping is correct even when J28 did not fire.
+    # Runs AFTER J28 so it can silently cancel a COLD->HOT upgrade when signals conflict.
+    j29_ender_index = _find_last_mid_conversation_ender_index(list(prepared.dialogue_turns))
+    j29_result = _calculate_j29_matrix(prepared, j29_ender_index)
+    if j29_result and gate_decision != GateDecision.DEGRADE:
+        j28_was_cold_to_hot = j28_trend is not None and j28_trend["trend"] == "COLD_TO_HOT"
+        if j28_was_cold_to_hot:
+            # Contradictory signals (Part_B shows both warm-up and naked-punct):
+            # silently roll back all J28 overrides — treat as no relationship progress.
+            send_recommendation = _base_send_recommendation
+            diagnosis = _base_diagnosis
+            dashboard = _base_dashboard
+            ledger = _base_ledger
+        else:
+            # J29 one-veto: naked punct in current window → force WAIT + note.
+            send_recommendation = Recommendation.WAIT
+            diagnosis = diagnosis.model_copy(
+                update={
+                    "strategy": "降压",
+                    "send_recommendation": send_recommendation,
+                    "one_line_explanation": "【投资失衡】当前活跃窗口检测到裸标点回复，建议立即降压观察。",
+                }
+            )
+            # J29 WAIT 不清空 message_bank，下游话术生成链按 WAIT 语义降级输出，
+            # 与 J30 契约统一（只有 BLOCK 才硬清空 message_bank）。
+            dashboard = dashboard.model_copy(
+                update={
+                    "action_light": _action_light(send_recommendation),
+                    "cooldown_timer": "24h",
+                    "stage_transition": "observe",
+                }
+            )
+            ledger = ledger.model_copy(
+                update={
+                    "note": _append_ledger_note(ledger.note, J29_NAKED_PUNCT_WARN),
+                }
+            )
+
+    # J30 Flow Interruption：仅在无终结词场景运行（有终结词时由 J28/J29 负责）
+    j30_actually_triggered = False
+    if j29_ender_index is None and gate_decision != GateDecision.DEGRADE:
+        last_speaker = (
+            prepared.dialogue_turns[-1].speaker
+            if prepared.dialogue_turns else None
+        )
+        if last_speaker == "SELF":
+            interruptions = scan_flow_interruptions(
+                list(prepared.dialogue_turns), J30_GAP_MINUTES
+            )
+            if len(interruptions) >= J30_MIN_INTERRUPTION_COUNT:
+                j30_actually_triggered = True
+                send_recommendation = Recommendation.WAIT
+                diagnosis = diagnosis.model_copy(
+                    update={
+                        "strategy": "降压",
+                        "send_recommendation": send_recommendation,
+                        "one_line_explanation": "【靠谱度警报】对方存在多次长间隔低价值回应，建议暂停追投。",
+                    }
+                )
+                # WAIT 不清空 message_bank，只修改灯号与冷却标签，
+                # 话术生成权留给下游（BLOCK 才硬清空）
+                dashboard = dashboard.model_copy(
+                    update={
+                        "action_light": _action_light(send_recommendation),
+                        "cooldown_timer": "24h",
+                        "stage_transition": "observe",
+                    }
+                )
+                ledger = ledger.model_copy(
+                    update={
+                        "note": _append_ledger_note(ledger.note, J30_WARN),
+                    }
+                )
+
+    # 心理学框架注入：使用各算法实际触发标记，避免用 send_recommendation 反推造成误报
+    _j30_triggered = j30_actually_triggered
+    _j29_naked = j29_result is not None and gate_decision != GateDecision.DEGRADE
+    _j28_trend_str: str | None = (
+        j28_trend["trend"] if j28_trend and gate_decision != GateDecision.DEGRADE else None
+    )
+    _llm_ctx = LLMContext(
+        j28_trend=_j28_trend_str,
+        j29_naked_punct=_j29_naked,
+        j30_triggered=_j30_triggered,
+        risk_signals=risk_signals,
+    )
+    try:
+        from app.prompt_builder import get_psychology_frame
+        psych_frame = get_psychology_frame(_llm_ctx)
+        ledger = ledger.model_copy(
+            update={"note": _append_ledger_note(ledger.note, psych_frame)}
+        )
+    except Exception:
+        pass  # 心理学框架注入失败不影响主流程
+
     probes = ProbePackage(available=bool(probes_items), items=probes_items)
 
     explain_card = ExplainCard(
@@ -310,6 +419,25 @@ def _calculate_j28_trend(prepared, self_mode: str, other_mode: str) -> dict[str,
         "part_a_state": part_a_state,
         "part_b_state": part_b_state,
     }
+
+
+def _calculate_j29_matrix(prepared, ender_index: int | None) -> dict | None:
+    """J29 Dominance Matrix: detect naked-punctuation replies in the current active window.
+
+    Scoping rule: if an ender was found by J28, scan only Part_B (turns after the ender)
+    so historical Part_A punctuation does not trigger false alarms.  When no ender exists,
+    scan the full dialogue.
+
+    Returns a dict with trigger info, or None if no naked-punct signal is present.
+    """
+    turns = list(prepared.dialogue_turns)
+    window = turns[ender_index + 1 :] if ender_index is not None else turns
+    naked_count = sum(
+        1 for turn in window if turn.speaker == "OTHER" and turn.is_naked_punctuation
+    )
+    if naked_count >= 1:
+        return {"trigger": "NAKED_PUNCT", "naked_punct_count": naked_count}
+    return None
 
 
 def _find_last_mid_conversation_ender_index(turns: list[Any]) -> int | None:

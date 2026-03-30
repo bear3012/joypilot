@@ -63,6 +63,7 @@ joypilot/
 │   └── module-10/               # 11个红队 fixture 文件
 ├── tests/test_api.py            # 全量测试（80个用例）
 ├── docs_control_center/
+│   ├── DEV_WORKFLOW.md          # 端到端开发工作流（与 module + 治理脚本对齐）
 │   ├── FIELD_REGISTRY.md
 │   ├── CHANGE_IMPACT_MATRIX.md
 │   └── log.md
@@ -72,6 +73,8 @@ joypilot/
 ---
 
 ## 各模块详细说明
+
+开发顺序、治理命令（`field_sync` / `implement_doc_report`）与交付检查清单见 **[docs_control_center/DEV_WORKFLOW.md](docs_control_center/DEV_WORKFLOW.md)**。
 
 ---
 
@@ -434,6 +437,9 @@ summarize_risk_signals(signals, injection_hits)
 - SOP 模式过滤（J25，检测推脱词）
 - 探针动作建议（J26，低压力下一步）
 - 现实锚点报告（J27，仅基于截图事实）
+- **J28 终结词切片趋势分析**：以 "晚安/去忙" 等终结词为切片点，比较前后半段 OTHER 的时延状态；HOT→COLD 强制 WAIT，COLD→HOT 强制 YES（`gate_decision=DEGRADE` 时不触发）；覆写时当前实现仍会清空 `message_bank`（与基础 WAIT 分支不同，见 FRONTEND 口径）
+- **J29 裸标点投资矩阵**：检测当前活跃窗口（Part_B 或全量）内 OTHER 的裸标点回复；触发则强制 WAIT + 文案；与 J28 矛盾时静默回退基础结论（不写任何文案），`gate_decision=DEGRADE` 时不触发；**WAIT 时不清空 `message_bank`，话术交由下游按 WAIT 语义降级生成**
+- **J30 连续性打断检测**：无中段终结词、且末条为 SELF 时，由 `input_service.scan_flow_interruptions()` 统计「SELF→OTHER 间距 >3h 且 OTHER 窗口拼接文本为低价值或裸标点」次数；≥2 次则强制 WAIT 并写入 ledger【靠谱度警报】；**不清空 `message_bank`**，`gate_decision=DEGRADE` 时不触发
 - 信号列表、门禁决策、审计写入
 
 #### 2. 能做到什么地步（边界与限制）
@@ -495,6 +501,9 @@ analyze_relationship(request)
   → _build_reality_anchor_report() → _enforce_j27_past_fact_only()
   → message_bank 生成（DEGRADE→1条稳妥; ALLOW+YES→1条低压探针; 其他→空）
   → _build_ledger() → _enforce_j24_qualitative_only()
+  → _calculate_j28_trend()      # J28 终结词切片：HOT->COLD 强制 WAIT；COLD->HOT 强制 YES
+  → _calculate_j29_matrix()     # J29 裸标点矩阵：当前窗口 OTHER 裸标点强制 WAIT；与 J28 矛盾时静默回退基础结论
+  → scan_flow_interruptions()   # J30（input_service）：无终结词 + 末条 SELF 时统计长间隔低价值回应；≥2 → WAIT + 靠谱度警报
   → _build_sop_filter() → _force_sop_footer()
   → _write_summary_stub()                     # module-9 审计写入
   → _write_audit_stub()                       # module-9 审计写入

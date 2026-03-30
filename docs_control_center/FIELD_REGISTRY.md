@@ -1,5 +1,44 @@
 # JoyPilot FIELD_REGISTRY
 
+## 命名惯例（查字段前必读）
+
+- 所有字段名统一用 `snake_case`，与 `contracts.py` Pydantic 模型保持一致。
+- 禁止 `camelCase` 或 `PascalCase` 字段名进入本文件。
+- 查询前先做三步 grep（见下方），三步全不命中才能确认为新字段。
+
+### 三步 grep 查重流程
+
+```bash
+# 步骤 1：精确匹配（snake_case 全名）
+rg "字段名" docs_control_center/FIELD_REGISTRY.md
+
+# 步骤 2：若不命中，用语义核心词 + 大小写不敏感
+rg -i "核心语义词" docs_control_center/FIELD_REGISTRY.md
+
+# 步骤 3：若仍不命中，检查下方别名表，确认非重复字段
+```
+
+三步全不命中 → 确认为新字段，按模板新增条目。
+
+### 别名表（语义等价字段登记处）
+
+<!-- FIELD_REGISTRY_ALIAS_START -->
+| 正式字段名（snake_case） | 已知别名 / 曾用名 | 说明 |
+|---|---|---|
+|  `dashboard.message_bank`  | `messageBank` |  旧前端命名，已统一为 snake_case 
+|  `structured_diagnosis.send_recommendation`  | `sendRecommendation`、`recommendation` |  关系判断与回话模式共用枚举 `YES/WAIT/NO` 
+|  `dashboard.stage_transition`  | `stageTransition` |  J28/J29 覆写后同步更新此字段 
+|  `ledger.note`  | `ledger_note`、`note`（ledger 上下文） |  J24/J28/J29 均通过 `_append_ledger_note` 追加 
+|  `dialogue_turn.is_naked_punctuation`  | `isNakedPunctuation`、`naked_punct` |  J29 矩阵消费，仅对 OTHER 有意义 
+|  `dialogue_turn.shows_personal_interest`  | `showsPersonalInterest` |  v1 恒为 False，LLM 预留 
+|  `dialogue_turn.is_naked_punctuation`  | `isNakedPunctuation` |  重复测试 
+<!-- FIELD_REGISTRY_ALIAS_END -->
+
+> 每次新增正式字段后，若存在可能的别名，在此表追加一行。
+
+---
+
+<!-- FIELD_REGISTRY_ACTIVE_START -->
 ## Active Fields
 
 ### Field: `contract_version`
@@ -18,7 +57,19 @@
 - Type: `array<object>`
 - Owner Module: `module-1`
 - Lifecycle: `Active`
-- Description & Constraints: 结构化对话列表，元素必须包含 `speaker/text/source_image_id`，并可携带 `timestamp_hint`（可空）供 J24 时延分析纯函数使用；供回话与关系判断共用。
+- Description & Constraints: 结构化对话列表，元素必须包含 `speaker/text/source_image_id`，并可携带 `timestamp_hint`（可空）供 J24 时延分析纯函数使用；供回话与关系判断共用。每个元素还携带 `is_naked_punctuation` 与 `shows_personal_interest` 两个布尔特征字段（见下方独立条目）。
+
+### Field: `dialogue_turn.is_naked_punctuation`
+- Type: `bool`
+- Owner Module: `module-J29`
+- Lifecycle: `Active`
+- Description & Constraints: 行为特征标记，由 `input_service.prepare_upload` 在构建 DialogueTurn 时注入。仅对 `speaker=OTHER` 的回合有意义；`True` 表示该回合内容去除首尾空格后完全由白名单标点构成（中英文常见标点集合）；Emoji / CJK / 字母 / 数字自动判 `False`，不存在误伤情绪表达的风险。默认 `False`，不影响旧契约。下游 J29 矩阵打分消费此字段。
+
+### Field: `dialogue_turn.shows_personal_interest`
+- Type: `bool`
+- Owner Module: `module-J29`
+- Lifecycle: `Reserved`
+- Description & Constraints: 语义特征预留字段，为未来 LLM 接入留口。v1 规则引擎恒为 `False`，不写任何判断逻辑。前端和下游不得依赖该字段做条件渲染或业务分支。LLM 接入后由外部赋值，规则引擎只读。
 
 ### Field: `prepared_upload.evidence_quality`
 - Type: `string`
@@ -87,16 +138,40 @@
 - Description & Constraints: 回话上下文仅保留当前 session；必须执行 FIFO 截断，最大轮次 `10`，总字符数上限 `2000`。
 
 ### Field: `dashboard.message_bank`
-- Type: `array<object>`
+- Type: `array<MessageBankItem>`
 - Owner Module: `module-4`
 - Lifecycle: `Active`
-- Description & Constraints: 当前可编辑回复路线，最多 3 条；`Safety Block` 命中时必须为空；`send_recommendation=NO` 时必须降为单条安全解释路线；`send_recommendation=WAIT` 时不得包含 `BOLD_HONEST`。
+- Description & Constraints: **REPLY（回话）模式**：当前可编辑回复路线，最多 3 条；`Safety Block` 命中时必须为空；`send_recommendation=NO` 时必须降为单条安全解释路线；`send_recommendation=WAIT` 时不得包含激进试探语气；BLOCK 时硬清空。**RELATIONSHIP（关系分析 / Mode2）**：始终为空数组；宏观态度与应对方式见 `structured_diagnosis`、`ledger.note`、`probes`（探针为低压力动作模板，非针对当前一句的逐字回复）。
+
+### Field: `dashboard.message_bank[].text`
+- Type: `string`
+- Owner Module: `module-4`
+- Lifecycle: `Active`
+- Description & Constraints: 话术正文（≤20字，特殊场景除外）；面向前端展示；由 LLM 生成或 Mock fallback 产出。
+
+### Field: `dashboard.message_bank[].tone`
+- Type: `string`
+- Owner Module: `module-4`
+- Lifecycle: `Active`
+- Description & Constraints: STABLE / NATURAL / PROACTIVE，对应保守/自然/主动三档语气。
+
+### Field: `dashboard.message_bank[].internal_reason`
+- Type: `string`
+- Owner Module: `module-4`
+- Lifecycle: `Active`
+- Description & Constraints: 给模型/排错用的「为什么生成这句」，偏逻辑与证据链简述；**产品上不推荐给终端用户展示**（与 `psychology_rationale` 区分：后者是用户能看的心理学一句人话）。当前 API 仍为整包 JSON，前端应只展示 `text` + `psychology_rationale`。
+
+### Field: `dashboard.message_bank[].psychology_rationale`
+- Type: `string`
+- Owner Module: `module-4`
+- Lifecycle: `Active`
+- Description & Constraints: 面向用户的心理学依据（例：「通过温和后撤打破对方的退缩防御机制」）；LLM 必须输出非空字符串；Mock fallback 允许为空字符串。
 
 ### Field: `dashboard.message_bank[].reason`
 - Type: `string`
 - Owner Module: `module-4`
-- Lifecycle: `Active`
-- Description & Constraints: 每条路线短解释必须具备现实锚点价值（情绪点或风险点）；禁止同义复读；低质量时由系统修复为中性模板文案。
+- Lifecycle: `Deprecated`
+- Description & Constraints: 旧版 `reason` 字段，已被 `internal_reason` + `psychology_rationale` 替代，保留供向后兼容，新实现不再写入此字段。
 
 ### Field: `reply_request.relationship_constraints`
 - Type: `object|null`
@@ -193,3 +268,7 @@
 - Owner Module: `module-8`
 - Lifecycle: `Active`
 - Description & Constraints: 是否使用单次急救包；仅在余额充足且范围合法时可进入 check&lock，两阶段提交后才真正扣减。
+
+
+
+<!-- FIELD_REGISTRY_ACTIVE_END -->

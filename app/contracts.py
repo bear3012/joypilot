@@ -78,6 +78,9 @@ class DialogueTurn(BaseModel):
     text: str
     source_image_id: str
     timestamp_hint: str | None = None
+    is_naked_punctuation: bool = False
+    # Semantic feature reserved for future LLM integration; always False in v1 rule engine.
+    shows_personal_interest: bool = False
 
 
 class PreparedUpload(BaseModel):
@@ -124,6 +127,15 @@ class SafetyBlock(BaseModel):
     note: str
 
 
+class MessageBankItem(BaseModel):
+    """???????text / tone / psychology_rationale ?????internal_reason ???????"""
+
+    text: str
+    tone: str  # STABLE | NATURAL | PROACTIVE
+    internal_reason: str = ""
+    psychology_rationale: str = ""
+
+
 class Dashboard(BaseModel):
     action_light: str
     tension_index: int
@@ -142,7 +154,7 @@ class Dashboard(BaseModel):
     macro_stage: str
     interest_discriminator_panel: str
     stage_transition: str
-    message_bank: list[dict] = Field(default_factory=list)
+    message_bank: list[MessageBankItem] = Field(default_factory=list)
 
 
 class ExplainCard(BaseModel):
@@ -229,21 +241,21 @@ class ReplyAnalyzeResponse(BaseModel):
 
 
 class ProbeItem(BaseModel):
-    probe_type: str = Field(description="J26 探针类型。")
-    intent: str = Field(description="仅用于下一步低压力核验意图，严禁倒推过往关系定性。")
-    template: str = Field(description="仅提供下一步动作选项，禁止逼答复、威胁或操控表达。")
-    when_to_use: str = Field(description="触发条件说明，仅描述当前输入事实。")
-    risk_level: str = Field(description="探针风险等级，默认用于低压力控制。")
-    expected_signal: str = Field(description="期望观察到的回流/对等/现实推进信号。")
-    do_not_overinterpret: str = Field(description="防过度解读提示，禁止单点信号定性。")
-    followup_rule: str = Field(description="后续动作规则，必须给出口，不追打。")
+    probe_type: str = Field(description="J26 ?????")
+    intent: str = Field(description="?????????????????????????")
+    template: str = Field(description="?????????????????????????")
+    when_to_use: str = Field(description="?????????????????")
+    risk_level: str = Field(description="?????????????????")
+    expected_signal: str = Field(description="????????/??/???????")
+    do_not_overinterpret: str = Field(description="?????????????????")
+    followup_rule: str = Field(description="?????????????????")
 
 
 class ProbePackage(BaseModel):
-    available: bool = Field(description="J26 探针开关。BLOCK 场景必须为 false。")
+    available: bool = Field(description="J26 ?????BLOCK ????? false?")
     items: list[ProbeItem] = Field(
         default_factory=list,
-        description="J26 探针列表，仅包含下一步动作选项；BLOCK 场景必须为空。",
+        description="J26 ????????????????BLOCK ???????",
     )
 
 
@@ -255,24 +267,24 @@ class ProgressValidation(BaseModel):
 
 class RealityAnchorReport(BaseModel):
     available: bool
-    tone: str = Field(description="J27 语气，必须中性、无羞辱无胁迫。")
-    access: str = Field(description="J27 输出级别。BLOCK 场景必须为 ALERT_ONLY。")
+    tone: str = Field(description="J27 ???????????????")
+    access: str = Field(description="J27 ?????BLOCK ????? ALERT_ONLY?")
     delay_gate_sec: int
     brief_points: list[str] = Field(
-        description="仅基于当前截图事实；严禁预测未来走向；至少包含一个低压力动作建议。"
+        description="?????????????????????????????????"
     )
     full_text: str | None = Field(
         default=None,
-        description="仅基于当前截图事实进行解释，严禁出现未来预测性表述。",
+        description="??????????????????????????",
     )
 
 
 class LedgerSummary(BaseModel):
-    asymmetric_risk: str = Field(description="J24 定性失衡等级，仅允许 LOW/MEDIUM/HIGH。")
+    asymmetric_risk: str = Field(description="J24 ?????????? LOW/MEDIUM/HIGH?")
     evidence: list[str] = Field(
-        description="J24 定性证据。严禁百分比、字数统计、时长对比、比例公式等数学量化表述。"
+        description="J24 ?????????????????????????????????"
     )
-    note: str = Field(description="J24 中性说明，不得引导焦虑或给出伪量化结论。")
+    note: str = Field(description="J24 ????????????????????")
 
 
 class SopFilterSummary(BaseModel):
@@ -280,7 +292,28 @@ class SopFilterSummary(BaseModel):
     hits: list[str]
     risk_escalation: str
     evidence_signals: list[str]
-    footer: str = Field(default="模式提示不等于定罪。", description="J25 固定免责声明，序列化出口必须强制附加。")
+    footer: str = Field(default="??????????", description="J25 ???????????????????")
+
+
+class LLMContext(BaseModel):
+    """?? LLM ????????????? context ???"""
+
+    j28_trend: str | None = None  # HOT_TO_COLD | COLD_TO_HOT | NONE
+    j29_naked_punct: bool = False
+    j30_triggered: bool = False
+    risk_signals: list[str] = Field(default_factory=list)
+    dialogue_window: list[dict] = Field(default_factory=list)
+
+
+class ReviewEntry(BaseModel):
+    """??????????????????? Few-Shot ????"""
+
+    user_id: str
+    selected_text: str
+    rejected_texts: list[str] = Field(default_factory=list)
+    context_fingerprint: str
+    j_series_snapshot: dict = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
 class RelationshipAnalyzeRequest(BaseModel):

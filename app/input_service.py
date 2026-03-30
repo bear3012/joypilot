@@ -25,6 +25,28 @@ from app.contracts import (
     UploadPrepareRequest,
 )
 
+# Allowlist-based regex: only characters from the recognized punctuation set match.
+# Emoji, CJK characters, Latin letters, and digits are NOT in the allowlist, so they
+# will never be misclassified as "naked punctuation".
+_NAKED_PUNCT_RE = re.compile(
+    r"^["
+    r"。，？！；：…、～—「」『』【】《》〈〉·"
+    r'.,?!;:~\-_()\[\]{}"\'`'
+    r"]+$"
+)
+
+
+def _is_naked_punctuation(text: str) -> bool:
+    """Return True only if text (after stripping whitespace) consists solely of
+    recognized punctuation characters.  Empty or whitespace-only strings return
+    False (no content — not a negative signal).
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return bool(_NAKED_PUNCT_RE.match(stripped))
+
+
 CONVERSATION_ENDERS = (
     "晚安",
     "拜拜",
@@ -57,21 +79,25 @@ def prepare_upload(request: UploadPrepareRequest) -> PreparedUpload:
         left_text = frame.left_text.strip()
         right_text = frame.right_text.strip()
         if left_text:
+            left_speaker = _map_side("LEFT", request.my_side)
             dialogue_turns.append(
                 DialogueTurn(
-                    speaker=_map_side("LEFT", request.my_side),
+                    speaker=left_speaker,
                     text=left_text,
                     source_image_id=frame.image_id,
                     timestamp_hint=frame.timestamp_hint,
+                    is_naked_punctuation=left_speaker == "OTHER" and _is_naked_punctuation(left_text),
                 )
             )
         if right_text:
+            right_speaker = _map_side("RIGHT", request.my_side)
             dialogue_turns.append(
                 DialogueTurn(
-                    speaker=_map_side("RIGHT", request.my_side),
+                    speaker=right_speaker,
                     text=right_text,
                     source_image_id=frame.image_id,
                     timestamp_hint=frame.timestamp_hint,
+                    is_naked_punctuation=right_speaker == "OTHER" and _is_naked_punctuation(right_text),
                 )
             )
 
@@ -457,6 +483,59 @@ def analyze_latency_from_turns(dialogue_turns: list[DialogueTurn]) -> dict[str, 
         "other_ender_count": other_ender_count,
         "other_ender_warning": other_ender_count >= OTHER_ENDER_WARNING_THRESHOLD,
     }
+
+
+def scan_flow_interruptions(
+    dialogue_turns: list[DialogueTurn],
+    gap_minutes: int,
+) -> list[dict[str, int | bool]]:
+    """
+    扫描 OTHER 的无效回应次数。
+
+    判定规则（两门均须命中）：
+    1. 时间门：上一个 SELF 窗口末尾 → 本 OTHER 窗口开头，间隔 > gap_minutes
+    2. 内容门：将本 OTHER 窗口内所有消息文本拼接后整体评估；
+       同时检查该窗口内是否有任意一条 is_naked_punctuation=True 的消息。
+       任一条件为真则视为低价值，否则视为有效回应不计入。
+
+    设计要点：
+    - 直接在 dialogue_turns 上做滑动分组，持有原始对象引用，
+      不做文本反查（避免"幽灵引用"bug，RT-J30-1）。
+    - 拼接窗口全量文本评估，不只看 tail_text（RT-J30-2）。
+    - t.text 过滤 None，防止纯图片消息导致 TypeError（RT-J30-4）。
+    - 只看 SELF → OTHER 切换时 SELF 最后一条与 OTHER 第一条之间的间隔。
+    """
+    results: list[dict[str, int | bool]] = []
+
+    groups: list[dict] = []
+    for turn in dialogue_turns:
+        if groups and groups[-1]["speaker"] == turn.speaker:
+            groups[-1]["turns"].append(turn)
+        else:
+            groups.append({"speaker": turn.speaker, "turns": [turn]})
+
+    for prev_group, curr_group in zip(groups, groups[1:]):
+        if curr_group["speaker"] != "OTHER":
+            continue
+
+        prev_last_minute = parse_time_hint_to_minutes(prev_group["turns"][-1].timestamp_hint)
+        curr_first_minute = parse_time_hint_to_minutes(curr_group["turns"][0].timestamp_hint)
+        delta, explicit = _derive_gap_minutes(prev_last_minute, curr_first_minute)
+
+        if not explicit or delta <= gap_minutes:
+            continue
+
+        combined_text = " ".join(t.text for t in curr_group["turns"] if t.text)
+        is_low = _is_low_info_text(combined_text)
+        is_naked = any(t.is_naked_punctuation for t in curr_group["turns"])
+
+        if is_low or is_naked:
+            results.append({
+                "gap_minutes": delta,
+                "is_low_info": is_low,
+                "is_naked_punctuation": is_naked,
+            })
+    return results
 
 
 def _build_turn_windows(dialogue_turns: list[DialogueTurn]) -> list[dict[str, str | int | None]]:

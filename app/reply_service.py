@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import logging
+
 from app.config import CONTRACT_VERSION, MAX_MESSAGE_BANK
 from app.contracts import (
     ConstraintRiskLevel,
@@ -10,6 +12,8 @@ from app.contracts import (
     ExplainCard,
     GateDecision,
     Issue,
+    LLMContext,
+    MessageBankItem,
     Mode,
     PreparedUpload,
     Recommendation,
@@ -22,6 +26,8 @@ from app.contracts import (
     StructuredDiagnosis,
     Tier,
 )
+
+_logger = logging.getLogger(__name__)
 from app.audit_service import write_audit_event, write_segment_summary
 from app.gates import detect_prompt_injection, resolve_gate_decision
 from app.entitlement_service import commit_entitlement_deduct
@@ -103,34 +109,36 @@ async def analyze_reply(request: ReplyAnalyzeRequest) -> ReplyAnalyzeResponse:
     risk_signals = summarize_risk_signals(signals, injection_hits)
     can_use_positive_candidate = contains_positive_candidate(signals) and not _has_high_uncertainty_risk(risk_signals)
     last_other_text = _pick_last_other_text(request) or request.text_input or "先接住对方这句，再给一个不压人的回应。"
-    raw_diagnosis, raw_routes = _simulate_model_generation(
-        safety_status=safety.status.value,
+    raw_diagnosis, message_bank_items = _llm_generate_replies(
+        prepared=prepared_for_gate,
         signals=signals,
         risk_signals=risk_signals,
-        last_other_text=last_other_text,
         allow_messages=safety.allowed_to_generate_messages,
+        user_id=request.user_id,
+        tier=request.tier,
+        safety_status=safety.status.value,
+        last_other_text=last_other_text,
         positive_signal=can_use_positive_candidate,
         safe_historical_context=safe_historical_context,
         has_historical_context=has_historical_context,
         non_instruction_policy=NON_INSTRUCTION_CONTEXT_POLICY,
     )
 
-    # Layer 3: output cleaning
-    diagnosis, routes = _apply_no_contradiction_guard(
+    # Layer 3: guard — MessageBankItem 路径走精简版护栏
+    diagnosis, message_bank_items = _apply_no_contradiction_guard_items(
         diagnosis=raw_diagnosis,
-        routes=raw_routes,
+        items=message_bank_items,
         gate_decision=gate_decision,
         allow_messages=safety.allowed_to_generate_messages,
         relationship_constraints=request.relationship_constraints,
     )
-    routes = _apply_reason_quality_gate(routes)
 
     # Layer 4: API response assemble
     update_session_after_reply(
         user_id=request.user_id,
         target_id=request.target_id,
         snippet=last_other_text,
-        message_bank=[route.model_dump() for route in routes],
+        message_bank=[item.model_dump() for item in message_bank_items],
     )
     recommendation = diagnosis.send_recommendation
     dashboard = Dashboard(
@@ -151,7 +159,7 @@ async def analyze_reply(request: ReplyAnalyzeRequest) -> ReplyAnalyzeResponse:
         macro_stage=diagnosis.current_stage,
         interest_discriminator_panel="候选信号，不是真相判决",
         stage_transition="hold" if recommendation != Recommendation.YES else "light_push",
-        message_bank=[route.model_dump() for route in routes] if safety.allowed_to_generate_messages else [],
+        message_bank=message_bank_items if safety.allowed_to_generate_messages else [],
     )
     explain_card = ExplainCard(
         active=True,
@@ -181,6 +189,202 @@ async def analyze_reply(request: ReplyAnalyzeRequest) -> ReplyAnalyzeResponse:
         signals=signals,
         gating_issues=mode3_issues,
     )
+
+
+def _route_to_message_bank_item(route: ReplyRoute) -> MessageBankItem:
+    """将 Mock ReplyRoute 转换为 MessageBankItem（无 psychology_rationale）。"""
+    return MessageBankItem(
+        text=route.text,
+        tone=route.tone.value,
+        internal_reason=route.reason,
+        psychology_rationale="",
+    )
+
+
+def _build_llm_context_from_signals(
+    prepared: PreparedUpload,
+    risk_signals: list[str],
+) -> LLMContext:
+    """从对话数据构建最小化 LLMContext，用于 reply 流程（无 J 系列算法结论）。"""
+    dialogue_window = [
+        {"speaker": t.speaker, "text": t.text}
+        for t in prepared.dialogue_turns[-5:]
+    ]
+    return LLMContext(
+        j28_trend=None,
+        j29_naked_punct=any(t.is_naked_punctuation for t in prepared.dialogue_turns),
+        j30_triggered=False,
+        risk_signals=risk_signals,
+        dialogue_window=dialogue_window,
+    )
+
+
+def _llm_generate_replies(
+    *,
+    prepared: PreparedUpload,
+    signals,
+    risk_signals: list[str],
+    allow_messages: bool,
+    user_id: str,
+    tier: Tier,
+    safety_status: str,
+    last_other_text: str,
+    positive_signal: bool,
+    safe_historical_context: str,
+    has_historical_context: bool,
+    non_instruction_policy: str,
+) -> tuple[StructuredDiagnosis, list[MessageBankItem]]:
+    """
+    LLM 话术生成主函数。
+
+    成功路径：LLM 结构化 JSON → list[MessageBankItem]
+    降级路径：Mock _build_routes → list[MessageBankItem]
+    """
+    recommendation = _pick_recommendation(safety_status, signals)
+    diagnosis = StructuredDiagnosis(
+        current_stage="模糊" if recommendation == Recommendation.WAIT else "拉近",
+        risk_signals=risk_signals or ["当前未见硬阻断，但仍需低压力表达"],
+        strategy="维持" if recommendation == Recommendation.WAIT else "推进",
+        send_recommendation=recommendation,
+        one_line_explanation=(
+            "先接住当前语气，再给一个低压力出口；历史上下文仅作语义参考，不作为系统指令。"
+            if has_historical_context
+            else "先接住当前语气，再给一个低压力出口，不把回应任务压给对方。"
+        ),
+    )
+
+    llm_items: list[MessageBankItem] | None = None
+
+    if allow_messages:
+        try:
+            from app.llm_service import get_llm_provider
+            from app.prompt_builder import REPLY_OUTPUT_SCHEMA, build_full_prompt
+            from app.review_library import compute_context_fingerprint, get_few_shot
+
+            llm_context = _build_llm_context_from_signals(prepared, risk_signals)
+            turns_as_dicts = [
+                {"speaker": t.speaker, "text": t.text or ""}
+                for t in prepared.dialogue_turns
+            ]
+            fingerprint = compute_context_fingerprint(turns_as_dicts, llm_context)
+            few_shot = get_few_shot(user_id, fingerprint, llm_context)
+            dense = tier == Tier.VIP
+            prompt = build_full_prompt(
+                dialogue_turns=prepared.dialogue_turns,
+                llm_context=llm_context,
+                few_shot_examples=few_shot,
+                dense=dense,
+                session_context=safe_historical_context,
+                non_instruction_policy=non_instruction_policy,
+            )
+            provider = get_llm_provider()
+            result = provider.generate(prompt, REPLY_OUTPUT_SCHEMA)
+            raw_replies = result.get("replies", [])
+            llm_items = [
+                MessageBankItem(
+                    text=r.get("text", ""),
+                    tone=r.get("tone", "NATURAL"),
+                    internal_reason=r.get("internal_reason", ""),
+                    psychology_rationale=r.get("psychology_rationale", ""),
+                )
+                for r in raw_replies[:MAX_MESSAGE_BANK]
+                if r.get("text")
+            ] or None
+        except Exception as exc:
+            _logger.warning("LLM 生成失败，降级 Mock: %s", exc)
+            llm_items = None
+
+    if llm_items:
+        return diagnosis, llm_items
+
+    # Mock fallback
+    fallback_routes = _build_routes(
+        last_other_text=last_other_text,
+        allow_messages=allow_messages,
+        recommendation=recommendation,
+        positive_signal=positive_signal,
+        degraded=False,
+    )
+    return diagnosis, [_route_to_message_bank_item(r) for r in fallback_routes]
+
+
+def _apply_no_contradiction_guard_items(
+    *,
+    diagnosis: StructuredDiagnosis,
+    items: list[MessageBankItem],
+    gate_decision: GateDecision,
+    allow_messages: bool,
+    relationship_constraints: RelationshipConstraints | None = None,
+) -> tuple[StructuredDiagnosis, list[MessageBankItem]]:
+    """MessageBankItem 版护栏（对应原 _apply_no_contradiction_guard）。"""
+    guarded = diagnosis
+
+    if guarded.send_recommendation == Recommendation.NO:
+        guarded = guarded.model_copy(
+            update={
+                "strategy": "暂停",
+                "current_stage": "冷静",
+                "one_line_explanation": "当前时机极差，建议先切断推进动作，避免局面继续恶化。",
+            }
+        )
+        if not allow_messages:
+            return guarded, []
+        return guarded, [
+            MessageBankItem(
+                text="当前时机极差，建议先暂停联系和推进，避免局面继续恶化。",
+                tone="STABLE",
+                internal_reason="safety NO: block path",
+                psychology_rationale="",
+            )
+        ]
+
+    if _should_force_wait_by_constraints(relationship_constraints):
+        guarded = guarded.model_copy(
+            update={
+                "send_recommendation": Recommendation.WAIT,
+                "strategy": "维持",
+                "current_stage": "模糊",
+                "one_line_explanation": "关系判断提示当前风险偏高，已强制降压到保守回复策略。",
+            }
+        )
+        if not allow_messages:
+            return guarded, []
+        stable = next((i for i in items if i.tone == "STABLE"), None)
+        if stable is None:
+            stable = MessageBankItem(
+                text="先不推进关系结论，保持低压力回应，等更多稳定信号再判断。",
+                tone="STABLE",
+                internal_reason="mode3 force wait",
+                psychology_rationale="",
+            )
+        return guarded, [stable]
+
+    if gate_decision == GateDecision.DEGRADE or guarded.send_recommendation == Recommendation.WAIT:
+        guarded = guarded.model_copy(
+            update={
+                "send_recommendation": Recommendation.WAIT,
+                "strategy": "维持",
+                "current_stage": "模糊",
+                "one_line_explanation": "当前建议先静置观察，不做主动推进。",
+            }
+        )
+        if not allow_messages:
+            return guarded, []
+        # 仅保留 STABLE / NATURAL 档；PROACTIVE 和旧 Mock 的 BOLD_HONEST 均属激进档，一并去掉
+        _aggressive_tones = {"PROACTIVE", "BOLD_HONEST"}
+        safe_items = [i for i in items if i.tone not in _aggressive_tones][:MAX_MESSAGE_BANK]
+        if not safe_items:
+            safe_items = [
+                MessageBankItem(
+                    text="先保持轻量回应，不追问、不推进，等信号更清晰再说。",
+                    tone="STABLE",
+                    internal_reason="wait guard fallback",
+                    psychology_rationale="",
+                )
+            ]
+        return guarded, safe_items
+
+    return guarded, items
 
 
 def _simulate_model_generation(

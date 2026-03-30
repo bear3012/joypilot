@@ -7,6 +7,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import APP_NAME, CONTRACT_VERSION, FREE_RELATIONSHIP_DAILY_LIMIT, FREE_REPLY_AD_BONUS, FREE_REPLY_DAILY_LIMIT
+from pydantic import BaseModel, Field as PydanticField
+
 from app.contracts import (
     GateDecision,
     PreparedUpload,
@@ -20,6 +22,16 @@ from app.input_service import prepare_upload
 from app.relationship_service import analyze_relationship
 from app.reply_service import analyze_reply
 from app.storage import STORE
+
+
+class ReplyFeedbackRequest(BaseModel):
+    user_id: str
+    selected_text: str
+    rejected_texts: list[str] = PydanticField(default_factory=list)
+    context_fingerprint: str
+    j28_trend: str | None = None
+    j29_naked_punct: bool = False
+    j30_triggered: bool = False
 
 app = FastAPI(title=APP_NAME, version=CONTRACT_VERSION)
 
@@ -66,6 +78,27 @@ async def relationship_analyze(request: RelationshipAnalyzeRequest):
         if response.gating_issues:
             response.safety.block_reason = response.gating_issues[0].code
     return response
+
+
+@app.post("/reply/feedback")
+def reply_feedback(request: ReplyFeedbackRequest) -> dict:
+    """记录用户对话术的选择，写入复盘库供 Few-Shot 个性化。"""
+    from app.contracts import LLMContext
+    from app.review_library import add_entry
+
+    llm_ctx = LLMContext(
+        j28_trend=request.j28_trend,
+        j29_naked_punct=request.j29_naked_punct,
+        j30_triggered=request.j30_triggered,
+    )
+    add_entry(
+        user_id=request.user_id,
+        selected_text=request.selected_text,
+        rejected_texts=request.rejected_texts,
+        context_fingerprint=request.context_fingerprint,
+        llm_context=llm_ctx,
+    )
+    return {"status": "ok"}
 
 
 @app.get("/entitlement/state/{user_id}")

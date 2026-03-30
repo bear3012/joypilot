@@ -342,6 +342,12 @@ ConstraintStrategyHint = "PUSH" | "MAINTAIN" | "DEGRADE" | "WAIT"
 
 > **前端正确做法**：直接渲染后端返回的 `message_bank` 数组长度，**不得前端再做截断**；橙色横幅始终显示。
 
+> **J28 / J29 / J30 与 `message_bank`（非 DEGRADE，`ALLOW` 场景，以当前后端为准）：**  
+> - **J28（终结词趋势）**：HOT→COLD 或 COLD→HOT 覆写时，当前实现仍将 `message_bank` 置为 `[]`（与 mode2 仅报告、由后续链路生成话术的设计一致）。  
+> - **J29（裸标点）**、**J30（连续性打断）**：覆写为 WAIT 时**不**清空 `message_bank`，由基础链路已生成的话术保留，避免「诊断要求降压」与「话术区全空」矛盾；前端按数组实际长度渲染即可。  
+> - **矛盾场景**（J28 COLD→HOT + Part_B 裸标点）：J29 静默回退基础结论，`message_bank` 与基础链路一致，前端无需区分。  
+> 诊断文案以 `ledger.note` / `structured_diagnosis.one_line_explanation` 为准。
+
 ### 5.3 J25 免责声明强制规则
 
 `sop_filter.footer` 的值（`"模式提示不等于定罪。"`）**必须在 J25 面板中展示**，不得省略、折叠或以其他文案替换。

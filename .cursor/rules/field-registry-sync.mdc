@@ -1,0 +1,195 @@
+---
+description: JoyPilot 实施方案治理规则（轻量版）：每次执行任何模块实施方案时，先运行 field_sync 核查 FIELD_REGISTRY，用户确认后按差异触发更新文档，自审例外上报。
+globs:
+  - "app/contracts.py"
+  - "app/input_service.py"
+  - "app/relationship_service.py"
+  - "app/reply_service.py"
+  - "app/gates.py"
+  - "tools/implement_doc_report.py"
+  - "tools/field_sync.py"
+  - "tools/deliver.py"
+  - "tools/field_sync_config.json"
+alwaysApply: true
+---
+
+# JoyPilot 实施治理规则（轻量版）
+
+
+## 运行环境硬规定（field_sync 必遵）
+
+- **所有 `tools/field_sync.py` 治理命令（`--check` / `--apply` / `--report` / `--add-model` / `--strict`）一律用 `uv run python ...` 执行**，禁止仅用系统自带的 `python` 直跑。  
+  原因：系统 Python 常未装项目依赖（如 `pydantic`），会触发「运行时导入失败」类**假阻断**，与真实口径漂移无关。  
+- 在项目根目录执行；若遇模块路径问题，先设 `PYTHONPATH=.` 再跑（PowerShell：`$env:PYTHONPATH='.'`）。  
+- **AI 与用户文档中的示例命令须与此一致**；`log.md` 记录实施命令时也应写 `uv run` 形式，避免后人照抄失效。
+
+## 规划阶段（用户确认前）
+
+### 1. FIELD_REGISTRY 脚本核查（替代三步 grep）
+
+```bash
+# 规划阶段核查——任何方案提出"新增/修改 TRACKED_MODELS 字段"前必须先跑
+uv run python tools/field_sync.py --check
+
+# 同时跑 --report，得到字段维度 +（建议加上）代码路径维度的文档更新清单
+uv run python tools/field_sync.py --report --with-code
+```
+
+结论处理：
+- exit 0 → 当前已对齐，可继续规划
+- exit 1 → 先运行 `--apply` 补全草稿，再重跑 `--check` 确认对齐后方可继续
+
+**方案末尾只需一行核查结论：**
+```
+字段核查：uv run python tools/field_sync.py --check exit 0（已对齐）
+```
+
+### 1b. 新模型注册（有新 J 系列模型时）
+
+```bash
+# 将新模型注册到 field_sync_config.json，--check 立即开始追踪其字段
+uv run python tools/field_sync.py --add-model StructuredDiagnosis
+```
+
+注册后配置文件（`tools/field_sync_config.json`）自动排序更新，无需手动编辑。
+
+## 🔴 AI 行为强制约束（不可绕过）
+
+运行 `uv run python tools/field_sync.py --check` 后：
+
+- **exit 0**：继续后续步骤
+- **exit 非 0**：
+  - 必须立即停止所有代码修改和测试操作
+  - 禁止输出任何"临时绕过"或"稍后修复"的方案
+  - 只允许执行以下两个动作之一：
+    1. 运行 `uv run python tools/field_sync.py --apply` 修复问题，再重跑 `--check`
+    2. 向用户报告阻断原因，等待人工决策
+  - 违反此规则等同于违反口径漂移红线，必须重新提交实施方案
+
+---
+
+## 执行阶段（用户确认后）
+
+### 2. 先补 FIELD_REGISTRY，再改代码
+
+```bash
+# 新增字段后，用 --apply 自动生成草稿条目和别名行
+uv run python tools/field_sync.py --apply
+
+# 草稿生成后，人工补全 TODO 描述，再重跑 --check 确认对齐
+uv run python tools/field_sync.py --check
+```
+
+字段模板（--apply 自动生成，人工补全 Description）：
+```markdown
+### Field: `<model>.<field>`
+- Type: `<type>`
+- Owner Module: `TODO`
+- Lifecycle: `Active`
+- Description & Constraints: TODO
+```
+
+### 3. 差异触发文档同步（无变化则跳过）
+
+| 变更类型 | 必更新 | 跳过 |
+|---|---|---|
+| 新增/修改 Pydantic 字段 | FIELD_REGISTRY | — |
+| 新增算法节点或工作流变化 | README（仅 module 描述节）| MASTER_PLAN |
+| 影响 message_bank / send_recommendation | FRONTEND_PLAN_ALIGNED | — |
+| 任何实施完成 | log.md（命令 + 原始输出）| — |
+| 无以上变化 | 仅 log.md | 其余全跳过 |
+
+### 3b. 代码路径 → 文档清单（算法/逻辑收尾，与字段报告互补）
+
+`field_sync --report` 仅在有 **contracts 追踪字段** 变化时给出 README/FRONTEND 提示；**纯算法**（只改 `relationship_service.py` 等、未改 Pydantic 字段）时不会出现在字段报告里，必须用代码路径清单兜底：
+
+```bash
+# 推荐：字段报告 + 根据 git 变更文件匹配 README/FRONTEND/log 等待办
+uv run python tools/field_sync.py --report --with-code
+
+# 无 git 仓库时，显式传入本次改动的路径（相对项目根）
+uv run python tools/implement_doc_report.py --files app/relationship_service.py
+```
+
+说明：**脚本只输出待办清单，不自动改写文档**；由实施者在同一轮提交里按清单更新对应模块并写入 `log.md`。
+
+### 4. 测试与交付前核查
+
+**`--check` 是 pytest 的前置依赖，不是可选的开工仪式。**  
+Mock 测试可能在字段未注册时仍通过，导致契约腐败悄无声息入库。
+
+```bash
+# 每轮编码结束后，先闸门再测试（两步必须连续）
+uv run python tools/field_sync.py --check        # exit 1 则停止，不得跑 pytest
+uv run pytest tests/test_api.py -q -k "功能名"   # 专项先跑
+uv run pytest tests/test_api.py -q               # 全量回归
+
+# 阶段性 milestone / push 到主分支前：--strict 强制清账
+# （TODO_STALE / ALIAS_UNCONFIRMED / BASELINE_REDUNDANT 全部升级为 exit 1）
+uv run python tools/field_sync.py --check --strict
+```
+
+> ⚠️ `--report --with-code` 依赖 git diff，必须在 `git commit` **之前**运行；提交后 diff 为空，报告将无输出，README 漏更无提示。
+
+### 4b. 模块交付收尾（AI 强制闭环）
+
+**触发条件：** 本轮对话中完成了「模块实施」——改动了 `app/`、`tests/`、`tools/`（field_sync 相关）或契约/配置，并在向用户**交付、宣称「完成」「可收工」**之前。
+
+**禁止行为：** 在未跑通下方命令链、未按报告处理文档待办前，输出「任务已完成」类结案语。
+
+**必须执行（项目根目录，PowerShell 可先设 `$env:PYTHONPATH='.'`）：**
+
+```bash
+uv run python tools/deliver.py
+```
+
+- **成功（exit 0）**：根据终端中的 `--report --with-code` 输出，**在同一轮对话内**落实 §3 表格与 CODE-PATH 清单（README / FRONTEND_PLAN_ALIGNED / FIELD_REGISTRY / log），再写 `log.md` 一节（命令 + 关键原始输出；忽略某项文档须附理由，见 `DEV_WORKFLOW.md`）。
+
+**`deliver.py` 不能跑通时的补救（等效闭环，仍需全部做完才算交付）：**
+
+| 情况 | 动作 |
+|------|------|
+| 报错：工作区干净（已 commit 或无可报告 diff） | 对**本次实际改动的相对路径**运行：`uv run python tools/implement_doc_report.py --files <path> [...]`，再连续执行 `uv run python tools/field_sync.py --check` 与 `uv run pytest tests/test_api.py -q`，最后按输出与 §3 更新文档与 `log.md`。 |
+| 非 git 仓库：脚本仅 WARN | 仍须执行：`uv run python tools/field_sync.py --check`、`uv run python tools/field_sync.py --report --with-code`（代码路径段可能为空）、`uv run python tools/implement_doc_report.py --files <本轮改动路径>`，再 `uv run pytest tests/test_api.py -q`，并落实文档与 `log.md`。 |
+
+**与 §「AI 行为强制约束」的关系：** `deliver` 或等效链中若 `--check` exit 非 0，仍适用「立即停止、仅 `--apply` 或等人决策」；不得跳过闸门宣称已交付。
+
+---
+
+## 交付阶段（自审例外上报）
+
+无例外时只说一句：
+```
+自审通过（FIELD_REGISTRY ✓ / 文档 ✓ / 测试 N passed）
+```
+
+有例外时才单独列出：
+```
+例外：<具体问题 + 处理方式>
+```
+
+---
+
+## 口径漂移红线
+
+- 禁止在未完成 **§4b 模块交付收尾**（`deliver.py` 或等效命令链 + 按报告更新文档与 log）前，向用户宣称模块实施已交付或已收工
+- 禁止只改代码不查 FIELD_REGISTRY（`uv run python tools/field_sync.py --check` 是强制闸门；禁止用裸 `python` 跑 field_sync 造成假阻断）
+- 禁止文档描述的约束与代码行为不一致（以代码为准，必须更新文档）
+- 禁止 log.md 遗漏实施记录
+- 禁止 `--check` exit 1 时继续推进任何代码或测试工作
+
+## 免责范围
+
+`field_sync.py` 只追踪 `tools/field_sync_config.json` 中 `tracked_models` 列出的模型（默认：`DialogueTurn`、`PreparedUpload`、`Dashboard`）。
+`baseline_fields` 中的历史欠账字段不触发告警，但若字段已从 contracts.py 删除则报 `BASELINE_STALE`。
+其他模型（响应容器、请求入参、中间结构）的字段命名约定与 FIELD_REGISTRY 不同，不纳入自动核查范围。
+
+## --check 状态码速查
+
+| 场景 | 普通 --check | --strict |
+|---|---|---|
+| 完全对齐 | exit 0 | exit 0 |
+| MISSING / STALE / ALIAS_CONFLICT | exit 1 | exit 1 |
+| TODO_STALE / ALIAS_UNCONFIRMED / BASELINE_REDUNDANT | exit 0 + WARN | exit 1 |
+| contracts.py 语法/导入错误 | exit 1 | exit 1 |
+| BASELINE_STALE（字段已删除） | exit 1 | exit 1 |

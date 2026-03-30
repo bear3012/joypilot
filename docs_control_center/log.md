@@ -4,6 +4,345 @@
 
 ---
 
+## 2026-03-31 红队修补批次（RT-fixes）
+
+### 改动范围（5 文件）
+
+| 文件 | 修复内容 |
+|---|---|
+| `app/reply_service.py` | WAIT 护栏同时过滤 `BOLD_HONEST` + `PROACTIVE`（避免激进语气泄漏） |
+| `app/review_library.py` | `user_id` 路径穿越防御：引入 `_SAFE_USER_ID_RE` 白名单正则；`_safe_user_path` 函数封装 I/O 前校验 |
+| `app/prompt_builder.py` | `build_full_prompt` 新增 `session_context` / `non_instruction_policy` 参数，历史上下文现已实际注入 prompt |
+| `app/relationship_service.py` | J30 心理框架触发标记改用 `j30_actually_triggered` 局部变量，不再从 `send_recommendation` 反推（避免误报） |
+| `app/main.py` | `ReplyFeedbackRequest.rejected_texts` 改 `PydanticField(default_factory=list)`（修复可变默认值反模式） |
+
+### 执行命令与原始输出
+
+```
+uv run python tools/field_sync.py --check
+→ [OK] FIELD_REGISTRY 与 contracts.py 完全对齐，无漂移冲突。
+
+uv run pytest tests/test_api.py -q
+→ 123 passed in 1.62s
+```
+
+### 补充测试清单（5 条红队专项）
+
+- `test_wait_guard_removes_bold_honest_from_reply_bank`：WAIT 推荐下 message_bank 无激进语气
+- `test_review_library_rejects_path_traversal_user_id`：非法 user_id 不写文件
+- `test_review_library_accepts_valid_user_id`：合法 user_id 正常读写
+- `test_j30_psychology_frame_only_fires_on_actual_j30`：J30 未命中不注入 J30 心理框架
+- `test_prompt_builder_session_context_injected_in_prompt`：历史上下文正确注入 prompt
+
+### 文档变更
+
+无 Pydantic 字段新增，FIELD_REGISTRY 无需更新。
+
+---
+
+## 2026-03-30 Mode A 话术 LLM 集成实施记录
+
+### 实施范围
+涉及文件（6 个改动 + 4 个新建）：
+- `app/contracts.py`：新增 `MessageBankItem`、`LLMContext`、`ReviewEntry`；`Dashboard.message_bank` 类型从 `list[dict]` 升级为 `list[MessageBankItem]`
+- `app/config.py`：新增 `LLM_PROVIDER`、`GEMINI_MODEL`、`LLM_MAX_REPLY_TOKENS`、`NEGATIVE_RULES`、`PSYCHOLOGY_FRAME_MAP`、`REVIEW_LIBRARY_PATH`
+- `app/llm_service.py`（新建）：`LLMProvider` 抽象接口、`GeminiProvider`（structured output + 文本 fallback）、`MockProvider`、`get_llm_provider()` 工厂
+- `app/prompt_builder.py`（新建）：`build_system_prompt`、`build_context_injection`（Mode1/Mode3）、`build_few_shot_block`、`build_full_prompt`、`get_psychology_frame`
+- `app/review_library.py`（新建）：SHA-256 联合指纹、`add_entry`、`get_few_shot`（精确匹配 + J 系列相似度补足）
+- `app/reply_service.py`：`_llm_generate_replies` 替换 `_simulate_model_generation`；`_apply_no_contradiction_guard_items`；Dashboard.message_bank 类型对齐
+- `app/relationship_service.py`：`message_bank` 改为 `list[MessageBankItem]`；注入 `get_psychology_frame` 到 `ledger.note`
+- `app/main.py`：新增 `POST /reply/feedback` 路由
+- `docs_control_center/FIELD_REGISTRY.md`：补全 `dashboard.message_bank` 子字段（text/tone/internal_reason/psychology_rationale/reason[Deprecated]）
+
+### 执行命令与关键输出
+
+```
+# 字段闸门（改动前）
+uv run python tools/field_sync.py --check
+# [OK] FIELD_REGISTRY 与 contracts.py 完全对齐，无冲突
+
+# 字段闸门（contracts 改动后）
+uv run python tools/field_sync.py --check
+# [OK] FIELD_REGISTRY 与 contracts.py 完全对齐，无冲突
+
+# 测试（全量回归）
+uv run pytest tests/test_api.py -q
+# 118 passed in 1.56s
+
+# deliver 交付闭环
+uv run python tools/deliver.py
+# 全部通过，可执行 git commit
+```
+
+### FIELD_REGISTRY 变更摘要
+- `dashboard.message_bank` 类型注记从 `array<object>` → `array<MessageBankItem>`
+- 新增子字段：`message_bank[].text`、`message_bank[].tone`、`message_bank[].internal_reason`、`message_bank[].psychology_rationale`
+- `message_bank[].reason` 标记为 `Deprecated`
+
+### 文档更新情况（来自 deliver --report --with-code 清单）
+- `FIELD_REGISTRY.md`：已更新（本轮）
+- `README.md`：不更新（本轮仅新增 LLM 层内部实现，未改变外暴 API 语义；reply/feedback 是新增轻量端点，不影响主流程文档）
+- `FRONTEND_PLAN_ALIGNED.md`：不更新（`MessageBankItem` 字段已在 FIELD_REGISTRY 登记；前端对接 schema 不变，仅增加 `psychology_rationale` 可选展示字段，前端可按需读取）
+
+### 2026-03-31 口径修订（Mode2 无话术 + internal_reason）
+- **产品口径**：关系分析（RELATIONSHIP / Mode2）`dashboard.message_bank` 恒为空；态度与宏观应对见 `structured_diagnosis`、`ledger.note`、`probes`（探针为低压力动作方向，非针对当前一句的逐字回复）。DEGRADE 时在 `ledger.note` 追加【策略提示】段落（替代原 message_bank 单条话术）。
+- **FIELD_REGISTRY**：`message_bank` / `internal_reason` 描述已与上述对齐；`internal_reason` 约定为排错与模型归因，前端仅展示 `text` + `psychology_rationale`。
+- **验证**：`uv run python tools/field_sync.py --check` exit 0；`uv run pytest tests/test_api.py -q` → 118 passed（本轮执行后）。
+
+---
+
+## 2026-03-30 补全 field-registry-sync.mdc §4b（模块交付收尾）
+
+### 实施范围
+- `.cursor/rules/field-registry-sync.mdc`：`globs` 增加 `tools/deliver.py`；§4 后新增 **§4b 模块交付收尾（AI 强制闭环）**（含 `deliver.py` 与补救表）；**口径漂移红线**新增「未完成 §4b 前禁止宣称交付」
+
+### 执行命令
+```
+uv run python tools/field_sync.py --check
+# [OK] FIELD_REGISTRY 与 contracts.py 完全对齐，无字段冲突。exit 0
+```
+
+自审通过（FIELD_REGISTRY ✓ / .mdc §4b ✓ / 纯规则文件未跑 pytest）
+
+---
+
+## 2026-03-30 AI 模块交付收尾（DEV_WORKFLOW）
+
+### 实施范围
+- `docs_control_center/DEV_WORKFLOW.md`：文首增加「AI 模块收尾」表，与 `.mdc` §4b 对齐（§4b 正文见上节）
+
+---
+
+## 2026-03-30 工作流优化：deliver.py + 决策树 + 文档解耦
+
+### 实施范围
+- 新建 `tools/deliver.py`：跨平台一键交付脚本
+- 修改 `docs_control_center/DEV_WORKFLOW.md`：mermaid 决策树 + §二精简 + §五更新
+
+### 优化明细
+
+| 优化项 | 内容 |
+|--------|------|
+| deliver.py | `subprocess.run(check=True)` 跨平台严格退出码；步骤 0 加 `git status --porcelain` 预检，工作区干净则阻断并提示补救命令；非 git 仓库则 WARN 跳过不阻断 |
+| mermaid 决策树 | DEV_WORKFLOW §三 新增流程图，覆盖字段闸门双向回滚、跨模块依赖序、pytest 前置依赖、deliver.py 出口等分支 |
+| 文档解耦（DRY） | DEV_WORKFLOW §二 删除与 .mdc 重复的阻断规则，改为"完整约束见 .mdc，本节只列时机和命令"引用式，消除双写漂移风险 |
+
+### 执行命令与输出
+```
+uv run python tools/field_sync.py --check
+# [OK] FIELD_REGISTRY 与 contracts.py 完全对齐，无字段冲突。exit 0
+```
+
+忽略说明：本次仅新增工具脚本和修改工作流文档，未改动任何 Pydantic 字段或对外 API 逻辑，README module 描述无需更新。
+
+自审通过（FIELD_REGISTRY ✓ / 文档 ✓ / 测试未跑——纯文档/工具变更，无新业务逻辑）
+
+---
+
+## 2026-03-30 DEV_WORKFLOW.md 红队漏洞修复
+
+### 实施范围
+- `docs_control_center/DEV_WORKFLOW.md`：全文修订（4 处红队漏洞加固）
+- `.cursor/rules/field-registry-sync.mdc`：§4 测试与交付前核查更新
+
+### 修复明细
+
+| 漏洞 | 修复内容 |
+|------|---------|
+| 漏洞 1：pytest 前未强制 `--check`，Mock 测试可使契约腐败入库 | 在 §二-1、§四-5、§五、§七 均明确"**`--check` 是 pytest 前置依赖**"；同步写入 `.mdc` §4 |
+| 漏洞 2：`--report --with-code` 在 commit 后运行 git diff 为空，README 漏更无感知 | §二-2、§五 均增加"**commit 前运行**"警告；补充已 commit 时的 `--files` 补救路径 |
+| 漏洞 3：module-10"孤岛化"，开发时跳过写测试 | 删除模块表中 module-10 独立行，改为脚注说明；§四-5 重写为"伴生测试，非后置" |
+| 漏洞 4：log 中声称"无需更新文档"但无理由，AI 惰性无法被 review 识别 | §四-7 & §四-8 增加显式说明要求；§七 速查表中对应行标注"**必须附理由**" |
+
+### 执行命令与输出
+```
+uv run python tools/field_sync.py --check
+# [OK] FIELD_REGISTRY 与 contracts.py 完全对齐，无字段冲突。exit 0
+
+uv run pytest tests/test_api.py -q
+# 110 passed in 1.62s
+```
+
+自审通过（FIELD_REGISTRY ✓ / 文档 ✓ / 测试 110 passed）
+
+---
+
+## 2026-03-30 新增 DEV_WORKFLOW.md + README 入口链接
+
+### 实施范围
+- 新增 `docs_control_center/DEV_WORKFLOW.md`：端到端开发工作流（module 地图、field_sync / implement_doc_report、checklist、交付命令）
+- `README.md`：项目结构树补充 `DEV_WORKFLOW.md`；「各模块详细说明」节前增加指向该文档的链接
+
+### 自审结论
+自审通过（文档 ✓；无契约字段变更，未跑 field_sync --apply）
+
+---
+
+## 2026-03-30 implement_doc_report 优化（覆盖补全 + 兜底规则 + 参数加固）
+
+### 优化点
+- `CODE_DOC_RULES` 补全 6 个 app 模块规则（`reply_service/reply_session_service/signal_service/entitlement_service/audit_service/storage/main`）
+- 新增 `app/*.py` 通配兜底规则：任何未被精确覆盖的 app 文件至少触发 log 提醒
+- `--files` 参数从 `nargs="*"` 改为 `nargs="+"`，防止无参时静默跳过
+- `.cursor/rules/field-registry-sync.mdc` globs 补入 `tools/implement_doc_report.py`、`field_sync.py`、`field_sync_config.json`
+- 修复 `field_sync.py` 重复 import 行加注释说明
+
+### 执行命令与原始输出
+```
+uv run pytest tests/test_api.py -q
+110 passed in 1.63s
+```
+
+### 自审结论
+自审通过（FIELD_REGISTRY ✓ / 文档 ✓ / 测试 110 passed）
+
+---
+
+## 2026-03-30 实施后文档清单自动化（implement_doc_report + field_sync --report --with-code）
+
+### 动机
+纯算法改动不触发 `field_sync` 追踪字段时，`--report` 字段段无法提示 README/FRONTEND 更新；补充「代码路径 → 文档」清单，与 Cursor 规则 3b 对齐。
+
+### 实施范围
+- 新增 `tools/implement_doc_report.py`：按 git 变更或 `--files` 匹配预设规则，输出 README / FRONTEND / FIELD_REGISTRY / log / 规则文件等待办
+- `tools/field_sync.py`：`--report` 支持 `--with-code`，追加加载上述脚本（无 git 时软跳过并提示 `--files`）
+- `.cursor/rules/field-registry-sync.mdc`：规划阶段与 §3b 增补 `--report --with-code` 与独立脚本用法
+- `docs_control_center/FIELD_SYNC_UV_RUN.md`：备查命令
+- `README.md` module-6：补 J30 与 J29/J30 `message_bank` 口径；流程图增加 `scan_flow_interruptions`
+- `docs_control_center/FRONTEND_PLAN_ALIGNED.md`：修正 J28/J29/J30 与 `message_bank` 描述（与当前后端一致）
+
+### 执行命令与原始输出（摘录）
+```
+uv run python tools/field_sync.py --report --with-code
+（输出含 [REPORT] 字段段 + [CODE-PATH REPORT] 段；无契约变更时字段段可为 [OK]）
+
+uv run pytest tests/test_api.py -q
+110 passed
+```
+
+### 自审结论
+自审通过（FIELD_REGISTRY ✓ / 文档 ✓ / 测试 110 passed）
+
+---
+
+## 2026-03-30 J29 契约对齐补丁（WAIT 分支 message_bank 清空修复）
+
+### 问题
+审计发现 J29 WAIT 分支硬清空 `message_bank`，违背"仅 BLOCK 才清空"的架构契约，与 J30 WAIT 行为不一致。
+
+### 修复范围
+- `app/relationship_service.py`：J29 WAIT 分支移除 `"message_bank": []` 覆写；保留灯号、冷却计时、阶段标签
+- `tests/test_api.py`：`test_j29_other_naked_punct_forces_wait_and_note` 移除错误断言 `message_bank == []`，改为断言 `action_light == "YELLOW"`
+
+### 执行命令与原始输出
+```
+uv run pytest tests/test_api.py -q -k "j29 or j30"
+9 passed, 101 deselected in 0.71s
+
+uv run pytest tests/test_api.py -q
+110 passed in 1.50s
+```
+
+### 自审结论
+自审通过（FIELD_REGISTRY ✓ / 文档 ✓ / 测试 110 passed）
+
+---
+
+## 2026-03-30 J30 连续性打断检测（Flow Interruption Detection）
+
+### 实施范围
+- `app/config.py`：新增 `J30_GAP_MINUTES=180`、`J30_MIN_INTERRUPTION_COUNT=2`、`J30_WARN`
+- `app/input_service.py`：新增公开函数 `scan_flow_interruptions()`，直接在原始 `dialogue_turns` 上分组遍历，持有对象引用（规避 RT-J30-1 幽灵引用），拼接全量文本（规避 RT-J30-2），过滤 `None`（规避 RT-J30-4）
+- `app/relationship_service.py`：导入新函数与常量；在 J29 执行块后注入 J30 执行块；WAIT 不清空 `message_bank`（规避 RT-J30-3）
+- `tests/test_api.py`：新增 3 个集成测试（正向触发、时间门不触发、内容门不触发）
+
+### 红队补丁
+| 编号 | 漏洞 | 修复 |
+|---|---|---|
+| RT-J30-1 | tail_text 文本反查导致幽灵引用 | 直接在原始对象上分组，从 turn.is_naked_punctuation 读取 |
+| RT-J30-2 | 只看 tail_text 一条消息 | 拼接窗口全量文本整体评估 |
+| RT-J30-3 | WAIT 硬清空 message_bank | 移除覆写，只改灯号与冷却标签 |
+| RT-J30-4 | t.text 为 None 导致 TypeError 500 | 过滤空值 if t.text |
+
+### 执行命令与原始输出
+```
+uv run python tools/field_sync.py --check
+[OK] FIELD_REGISTRY 与 contracts.py 完全对齐，无字段冲突。
+
+uv run pytest tests/test_api.py -q -k "j30"
+3 passed, 107 deselected in 0.70s
+
+uv run pytest tests/test_api.py -q
+110 passed in 1.61s
+
+uv run python tools/field_sync.py --check --strict
+[OK] FIELD_REGISTRY 与 contracts.py 完全对齐，无字段冲突。
+```
+
+### 自审结论
+自审通过（FIELD_REGISTRY ✓ / 文档 ✓ / 测试 110 passed）
+
+---
+
+## 2026-03-30 field_sync v2 治理加固（RT-5 ~ RT-9 + --strict + --report + --add-model）
+
+### 变更摘要
+- **RT-5**：`--check` 新增 `BASELINE_STALE`（豁免字段在 contracts.py 已删除 → exit 1）和 `BASELINE_REDUNDANT`（已登记可移除 → WARN）
+- **RT-6**：双层守卫——`py_compile` 语法预检 + `importlib.import_module` 运行时异常捕获，AI 可读错误信息
+- **RT-7**：`TRACKED_MODELS` 和 `REGISTRY_BASELINE` 从 `tools/field_sync_config.json` 读取；新增 `--add-model ModelName` 模式；写入时强制 `indent=2 + sort_keys + 数组排序`
+- **RT-8**：`--check` 新增 `[WARN] TODO_STALE`；`--apply` 幂等写入 `generated` 注释（已有标签则跳过）
+- **RT-9**：`--check` 新增 `[WARN] ALIAS_UNCONFIRMED`；`--apply` 别名行首次写时间戳，已有行不触碰
+- **新功能 --strict**：`--check --strict` 将所有 WARN 升级为 exit 1，用于阶段性验收清账
+- **新功能 --report**：输出结构化文档更新清单（`[必须]`/`[可选]` 分级）
+- `.cursor/rules/field-registry-sync.mdc`：补充 `--report`、`--add-model`、`--strict` 说明和状态码速查表
+
+### 验收测试（20/20 通过）
+```
+python tools/_test_field_sync_v2.py  →  20/20 PASS（测试脚本已删除）
+```
+
+### 全量回归
+```
+uv run --with pytest python -m pytest tests/ -q
+105 passed in 1.82s
+```
+
+### 修改文件清单
+1. `tools/field_sync.py`（主体改动，全量重写）
+2. `tools/field_sync_config.json`（新建，RT-7 外置配置）
+3. `.cursor/rules/field-registry-sync.mdc`（补充新命令说明）
+
+### 治理命令硬规定（uv run）
+- `.cursor/rules/field-registry-sync.mdc` 新增「运行环境硬规定」：所有 `field_sync.py` 子命令必须用 `uv run python ...`，禁止裸 `python`（避免系统环境缺依赖导致假阻断）。
+- 备查：`docs_control_center/FIELD_SYNC_UV_RUN.md`
+
+### 复审修补（颗粒度对齐 + 红队复审）
+- 修复 `--report` 口径冲突：存在“缺少别名行”时不再输出 `[OK] 无待处理项`
+- 规则文案口径一致化：`.mdc` 首行从“grep 核查”改为“field_sync 核查”
+- 新增回归测试 2 条：覆盖 `run_report()` 的“假绿灯”场景与“全清洁”场景
+
+### 执行命令与原始输出
+```powershell
+$env:PYTHONPATH='.'
+uv run --with pytest python -m pytest tests/test_api.py -q -k "field_sync_report"
+```
+```text
+..                                                                       [100%]
+2 passed, 105 deselected in 0.60s
+```
+
+```powershell
+$env:PYTHONPATH='.'
+uv run --with pytest python -m pytest tests/ -q
+```
+```text
+........................................................................ [ 67%]
+...................................                                      [100%]
+107 passed in 1.36s
+```
+
+---
+
 ## 2026-03-28 module-0 ~ module-10
 
 ### ????
@@ -2619,12 +2958,74 @@ Set-Location d:\joykeep\joypilot; .venv\Scripts\python.exe -m pytest -v
 ============================= 57 passed in 0.70s ==============================
 ```
 
-#### 4. ????
-???
+#### 4. 自审通过
+零 lint 错误。
 ```text
-ReadLints(paths=["d:\\joykeep\\joypilot\\tests\\test_api.py"])
+ReadLints: No linter errors found.
 ```
-?????
+
+---
+
+## J29 Dominance Matrix 特征提取层实施记录（2026-03-30）
+
+### 需求摘要
+重构"话语权与投资度矩阵"特征提取层，引入客观裸标点行为信号，废弃意图猜测，新增红队修复（Bug1一票否决权、Bug2时效聚焦、Emoji误判修复）。
+
+### 修改文件清单（共 4 个）
+1. `app/contracts.py` — DialogueTurn 追加 `is_naked_punctuation`、`shows_personal_interest`
+2. `app/input_service.py` — 新增 `_is_naked_punctuation`（白名单正则）、prepare_upload 注入
+3. `app/relationship_service.py` — 新增 `J29_NAKED_PUNCT_WARN` 常量、`_calculate_j29_matrix` 纯函数、主链注入（J28 之后，独立 ender 查找，三场景处理）
+4. `tests/test_api.py` — 6 个新测试（单元 + API 集成）
+
+### 关键架构决策
+- **白名单正则**：`_is_naked_punctuation` 用允许集合匹配，Emoji/特殊字符自动排除，无误判风险
+- **J29 执行顺序在 J28 之后**：具有一票否决权，可覆写 J28 的 YES
+- **J29 独立 ender 查找**：不依赖 J28 结果，确保 J28 未触发时仍能正确聚焦当前窗口
+- **COLD→HOT + 裸标点矛盾场景**：静默回退到 J24 基础状态（不写任何文案），不强制拍板
+
+### J29 专项测试结果
 ```text
-No linter errors found.
+命令：pytest tests/test_api.py -q -k "j29"
+结果：6 passed in 0.57s
 ```
+
+### 全量回归结果
+```text
+命令：pytest tests/test_api.py -q
+结果：105 passed in 1.28s（较上次 +6 新增用例，零回归）
+```
+
+### 自审清单
+- [x] `_is_naked_punctuation("😂")` → False（Emoji 不误判）
+- [x] `_is_naked_punctuation("T_T")` → False（英文字母排除）
+- [x] `_is_naked_punctuation("")` → False（空串不做负面判定）
+- [x] OTHER 裸标点触发 WAIT + 文案；SELF 裸标点不触发（主体隔离）
+- [x] 历史 Part_A 裸标点不触发（时效聚焦）
+- [x] J28 COLD→HOT + Part_B 裸标点 → 静默回退到基础结论（可能 YES/WAIT），无任何文案
+- [x] DEGRADE 场景 J29 不执行（安全门优先）
+
+---
+
+## J29 口径一致化修订（2026-03-30）
+
+### 变更目标
+统一“矛盾场景”口径：`COLD->HOT + Part_B 裸标点` 时，J29 仅静默取消 J28 覆写并回退基础结论（可能 YES/WAIT），不强制 WAIT。
+
+### 变更文件
+1. `c:\Users\amina\.cursor\plans\投资度矩阵特征提取_26a3c093.plan.md`（方案文本统一）
+2. `tests/test_api.py`（测试注释与断言统一）
+3. `docs_control_center/log.md`（实施记录补充）
+
+### 执行命令与原始输出
+```text
+命令：
+cd d:\joykeep\joypilot; $env:PYTHONPATH='.'; uv run --with pytest --with httpx --with fastapi pytest tests/test_api.py -q -k "j29_cold_to_hot_with_naked_punct_in_part_b_silently_cancels_j28 or j29" 2>&1
+
+输出：
+......                                                                   [100%]
+6 passed, 99 deselected in 0.63s
+```
+
+### 自审结论
+- 方案、测试、日志三处口径已统一。
+- 核心业务逻辑未改（仅文档与测试表述收敛）。

@@ -1,0 +1,38 @@
+{
+    "baseline_fields":  [
+                            "dashboard.action_light",
+                            "dashboard.adaptive_tension",
+                            "dashboard.availability_override",
+                            "dashboard.blindspot_risk",
+                            "dashboard.cooldown_timer",
+                            "dashboard.focus_redirect",
+                            "dashboard.frame_anchor",
+                            "dashboard.gearbox_ratio_radar",
+                            "dashboard.interest_discriminator_panel",
+                            "dashboard.macro_stage",
+                            "dashboard.mean_reversion",
+                            "dashboard.pressure_score",
+                            "dashboard.reciprocity_meter",
+                            "dashboard.stage_transition",
+                            "dashboard.suggestive_channel",
+                            "dashboard.sunk_cost_breaker",
+                            "dashboard.tension_index",
+                            "dialogue_turn.source_image_id",
+                            "dialogue_turn.speaker",
+                            "dialogue_turn.text",
+                            "dialogue_turn.timestamp_hint",
+                            "prepared_upload.duplicate_content_suspected",
+                            "prepared_upload.issues",
+                            "prepared_upload.mode",
+                            "prepared_upload.my_side",
+                            "prepared_upload.ocr_preview",
+                            "prepared_upload.screenshot_count",
+                            "prepared_upload.tier",
+                            "prepared_upload.timeline_confirmed"
+                        ],
+    "tracked_models":  [
+                           "Dashboard",
+                           "DialogueTurn",
+                           "PreparedUpload"
+                       ]
+}
